@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mori",
+  "version": "0.1.0",
+  "identifier": "local.mori.desktop-pet",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build && npm run package:backend",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Mori · Personal AI",
+        "width": 1360,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 620,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:4179 ws://127.0.0.1:18789"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "resources": {
+      "resources/server": "server",
+      "resources/node_modules": "node_modules",
+      "resources/package.json": "package.json",
+      "resources/binaries/node.exe": "binaries/node.exe"
+    },
+    "windows": { "nsis": { "displayLanguageSelector": false } },
+    "icon": []
+  }
+}

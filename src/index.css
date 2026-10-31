@@ -1,0 +1,23 @@
+:root {
+  font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  --display: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+  color: #222c2a;
+  background: #fafaf6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0;
+  font-optical-sizing: auto;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+body { min-height: 100vh; }
+button, input, textarea { font: inherit; letter-spacing: 0; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #83a58e; outline-offset: 2px; }
+::selection { color: #234b3c; background: #dbe9dc; }
+
+html.pet-window, html.pet-window body, html.pet-window #root { background: transparent; }
+html.pet-window { color-scheme: light; }
+html.chat-window { color-scheme: light; }
