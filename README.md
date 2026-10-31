@@ -37,7 +37,13 @@ Unsigned CI artifacts are for build validation only. A release intended for a Wi
 
 ### Code signing policy
 
-Mori is applying for free open-source code signing through SignPath Foundation. No signed release is claimed until the application is accepted and each release has passed its required signing approval. Releases are built from tagged source by GitHub-hosted Windows runners. Mori does not include user knowledge data or OpenClaw credentials in source archives or build artifacts.
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- Authors and committers: [Emin2008cym](https://github.com/Emin2008cym)
+- Reviewers: [Emin2008cym](https://github.com/Emin2008cym); contributions from other authors are reviewed before merge.
+- Approvers: [Emin2008cym](https://github.com/Emin2008cym)
+
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Mori defaults to local Ollama and loopback OpenClaw services; configuring a remote model or requesting an OpenClaw task can send the information required for that request to the configured service. Build artifacts contain no user knowledge data, conversation history, or OpenClaw credentials. Mori is applying for SignPath Foundation signing; no release is signed until acceptance and per-release approval are complete.
 
 ## OpenClaw desktop control
 

@@ -2,9 +2,9 @@
 
 ## Prepare the public repository
 
-This checkout has no Git history yet. Before publishing it, review the staged file list and confirm it contains only Mori source, assets, and lock files. The local Application Control report, generated `src-tauri/resources`, Rust build output, dependency folders, local settings, and private data are excluded by `.gitignore`.
+The public source repository is [Emin2008cym/mori-desktop-pet](https://github.com/Emin2008cym/mori-desktop-pet). The local Application Control report, generated `src-tauri/resources`, Rust build output, dependency folders, local settings, and private data are excluded by `.gitignore`.
 
-Create a public GitHub repository for Mori, then push this source tree. Do not add personal knowledge files, OpenClaw configuration, credentials, or build caches. Public Windows GitHub-hosted runners are the isolated build environment; no Windows Pro upgrade or local SAC change is needed.
+Keep source and lock-file changes in this repository. Do not add personal knowledge files, OpenClaw configuration, credentials, or build caches. Public Windows GitHub-hosted runners are the isolated build environment; no Windows Pro upgrade or local SAC change is needed.
 
 ## Run an unsigned validation build
 
@@ -17,9 +17,9 @@ The workflow runs `npm ci`, tests, the frontend build, and Tauri packaging on `w
 
 ## Apply for free signing
 
-SignPath Foundation's free program requires an eligible, actively maintained open-source project with an OSI-approved license and a published release. It may reject applications. Each release also requires approval in SignPath. Mori uses MIT; review the upstream dependency and image licenses before publishing. [SignPath Foundation eligibility](https://signpath.org/terms)
+SignPath Foundation's free program requires an eligible, actively maintained open-source project with an OSI-approved license and an existing public release in the form to be signed. It may reject applications. Each release also requires approval in SignPath. Mori uses MIT. Review third-party dependency and image licenses before each release. [SignPath Foundation eligibility](https://signpath.org/terms)
 
-After the first public source release:
+After the first public Windows release:
 
 1. Open [SignPath Foundation](https://signpath.org/) and apply for a free SignPath.io subscription.
 2. In SignPath, connect the public GitHub repository using the **GitHub.com** trusted build system, create a project with slug `mori`, and create the `release-signing` policy.
@@ -32,7 +32,7 @@ The signed workflow signs the Mori executable first, verifies it, then packages 
 
 ## Publish and install a signed release
 
-1. Create a version tag and public GitHub release after SignPath accepts the project. Include a **Code signing policy** section in the release description linking to the policy section on the project home page.
+1. Create a version tag and public GitHub release after SignPath accepts the project. Include a **Code signing policy** section in the release description linking to the policy section on the project home page. Before acceptance, the initial validation release may contain unsigned packages clearly labeled as untrusted build-validation files; do not present them as SAC-compatible installers.
 2. In GitHub, open **Actions > Signed Windows release > Run workflow**, enter the existing release tag, then start the workflow.
 3. Approve the run in the GitHub `release-signing` environment. If SignPath requests approval, review and approve the signing request there as well.
 4. Verify the uploaded `SHA256SUMS.txt` against the downloaded MSI and NSIS setup file. In Windows, check the Mori executable and each installer file's **Properties > Digital Signatures** tab before installation.
