@@ -43,7 +43,7 @@ Free code signing provided by [SignPath.io](https://signpath.io/), certificate b
 - Reviewers: [Emin2008cym](https://github.com/Emin2008cym); contributions from other authors are reviewed before merge.
 - Approvers: [Emin2008cym](https://github.com/Emin2008cym)
 
-This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Mori defaults to local Ollama and loopback OpenClaw services; configuring a remote model or requesting an OpenClaw task can send the information required for that request to the configured service. Build artifacts contain no user knowledge data, conversation history, or OpenClaw credentials. Mori is applying for SignPath Foundation signing; no release is signed until acceptance and per-release approval are complete.
+See the [Privacy Policy](PRIVACY.md). This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Mori is applying for SignPath Foundation signing; no release is signed until acceptance and per-release approval are complete.
 
 ## OpenClaw desktop control
 
