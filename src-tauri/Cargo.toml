@@ -1,6 +1,6 @@
 [package]
 name = "mori-desktop-pet"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local-first pixel pet for a private AI assistant"
 authors = ["Mori"]
 edition = "2021"

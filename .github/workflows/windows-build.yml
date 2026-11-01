@@ -73,7 +73,7 @@ jobs:
       - name: Stage local developer package payload
         shell: pwsh
         env:
-          PACKAGE_VERSION: 0.1.0.${{ github.run_number }}
+          PACKAGE_VERSION: 0.1.1.${{ github.run_number }}
         run: |
           $payload = Join-Path $env:RUNNER_TEMP 'mori-dev-payload'
           New-Item -ItemType Directory -Path $payload -Force | Out-Null

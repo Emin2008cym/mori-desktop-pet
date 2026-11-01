@@ -39,13 +39,7 @@ Unsigned MSI/NSIS CI artifacts are for build validation only. The portable paylo
 
 ### Code signing policy
 
-Planned provider: [SignPath.io](https://signpath.io/) and [SignPath Foundation](https://signpath.org/). Approval and signing have not been completed.
-
-- Authors and committers: [Emin2008cym](https://github.com/Emin2008cym)
-- Reviewers: [Emin2008cym](https://github.com/Emin2008cym); contributions from other authors are reviewed before merge.
-- Approvers: [Emin2008cym](https://github.com/Emin2008cym)
-
-See the [Privacy Policy](PRIVACY.md). This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Mori is applying for SignPath Foundation signing; no release is signed until acceptance and per-release approval are complete.
+Mori's [Code Signing Policy](CODE_SIGNING_POLICY.md) describes the current unsigned status, release approval roles, build provenance, and privacy commitments. SignPath Foundation approval and signing have not been completed.
 
 ## Mori desktop tasks
 

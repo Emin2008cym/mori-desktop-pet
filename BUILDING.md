@@ -30,25 +30,28 @@ The isolated packaged-runtime check copies production dependencies outside the r
 
 ## Apply for free signing
 
-SignPath Foundation's free program requires an eligible, actively maintained open-source project with an OSI-approved license and an existing public release in the form to be signed. It may reject applications. Each release also requires approval in SignPath. Mori uses MIT. Review third-party dependency and image licenses before each release. [SignPath Foundation eligibility](https://signpath.org/terms)
+The public `v0.1.0` prerelease already contains unsigned MSI/NSIS validation packages and a SHA-256 manifest. Its release notes clearly warn that these packages are not trusted installers and may be blocked by SAC. Do not represent them as signed or SAC-compatible.
 
-After the first public Windows release:
+SignPath Foundation's free program requires an eligible, actively maintained open-source project with an OSI-approved license and an existing public release in the form to be signed. It may reject applications. Each release requires manual approval. Mori's source code uses MIT; verify all bundled dependencies and artwork redistribution rights before applying. See the [Code Signing Policy](CODE_SIGNING_POLICY.md) and [SignPath Foundation eligibility](https://signpath.org/terms).
+
+To apply and configure the existing signed-release workflow:
 
 1. Open [SignPath Foundation](https://signpath.org/) and apply for a free SignPath.io subscription.
 2. In SignPath, connect the public GitHub repository using the **GitHub.com** trusted build system, create a project with slug `mori`, and create the `release-signing` policy.
-3. Create an artifact configuration named `app-executable` for the ZIP containing `mori-desktop-pet.exe`, and another named `windows-installers` for the ZIP containing the MSI and NSIS setup executable. Configure each to sign the expected Authenticode files.
+3. Create an artifact configuration named `app-executable` for the GitHub Actions artifact containing `mori-desktop-pet.exe`, and another named `windows-installers` for the artifact containing the MSI and NSIS setup executable. Configure each to sign only Mori's own files, enforce Mori product name and matching version metadata, and preserve upstream signatures.
 4. In the GitHub repository, open **Settings > Environments > New environment**, create `release-signing`, and require your own account as a reviewer.
 5. Open **Settings > Secrets and variables > Actions**. Add `SIGNPATH_API_TOKEN` as a repository secret. Add `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_APP_CONFIGURATION` (`app-executable`), and `SIGNPATH_INSTALLER_CONFIGURATION` (`windows-installers`) as repository variables. Never put the API token in a workflow file or commit it.
-6. In SignPath, enable manual approval for the release signing policy and configure its GitHub origin checks to require GitHub-hosted runners.
+6. In SignPath, enable manual approval for the release signing policy and configure its GitHub origin checks to require GitHub-hosted runners. Enable MFA for both GitHub and SignPath accounts.
 
 The signed workflow signs the Mori executable first, verifies it, then packages that signed file into MSI and NSIS installers and submits those installer files for signing. The packaged Node service is checked to contain no native `.node` add-ons. A separate, write-enabled job attaches the verified files to the existing GitHub release. The signing job has read-only GitHub permissions. The package configuration and policy slugs must match the values created in SignPath.
 
 ## Publish and install a signed release
 
-1. Create a version tag and public GitHub release after SignPath accepts the project. Include a **Code signing policy** section in the release description linking to the policy section on the project home page. Before acceptance, the initial validation release may contain unsigned packages clearly labeled as untrusted build-validation files; do not present them as SAC-compatible installers.
-2. In GitHub, open **Actions > Signed Windows release > Run workflow**, enter the existing release tag, then start the workflow.
-3. Approve the run in the GitHub `release-signing` environment. If SignPath requests approval, review and approve the signing request there as well.
-4. Verify the uploaded `SHA256SUMS.txt` against the downloaded MSI and NSIS setup file. In Windows, check the Mori executable and each installer file's **Properties > Digital Signatures** tab before installation.
-5. Keep Smart App Control enabled. Install one signed package and confirm Mori starts. Verify Ollama connectivity, then test a supervised task using the built-in Windows executor, including pause, takeover, approval, and result return.
+1. Merge the current Mori fixes into `main`. The app version is prepared as `0.1.1`; create a public `v0.1.1` prerelease from that commit. The signing workflow rejects tags that are not already on `main` and requires an existing GitHub release.
+2. Include a **Code signing policy** section in the release description linking to [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md). Keep unsigned validation assets clearly labeled as untrusted; do not present them as SAC-compatible installers.
+3. In GitHub, open **Actions > Signed Windows release > Run workflow**, enter the new release tag, then start the workflow.
+4. Approve the run in the GitHub `release-signing` environment. If SignPath requests approval, inspect the source tag and build result before approving the signing request.
+5. Verify the uploaded `SHA256SUMS.txt` against the downloaded MSI and NSIS setup file. In Windows, check the Mori executable and each installer file's **Properties > Digital Signatures** tab before installation.
+6. Keep Smart App Control enabled. Install one signed package and confirm Mori starts. Verify Ollama connectivity, then test a supervised task using the built-in Windows executor, including pause, takeover, approval, and result return.
 
-If SignPath does not accept the project, do not distribute unsigned packages as trusted installers. The fallback is private Microsoft Store distribution as MSIX, which requires a separate packaging adaptation and Store certification.
+If SignPath does not accept the project or the wait is too long, do not distribute unsigned packages as trusted installers. The paid fallback is a code-signing certificate issued through a CA in Microsoft's Trusted Root Program, connected to a protected signing service. That route can use a private source repository; it requires replacing the SignPath signing actions and validating the certificate chain on this Windows machine.
