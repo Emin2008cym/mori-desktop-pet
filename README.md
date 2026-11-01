@@ -31,9 +31,11 @@ npm run tauri:build
 
 ### Windows builds and code signing
 
-Mori's Windows packages are built on GitHub-hosted Windows runners. The workflow runs tests, builds the frontend and bundled local service, and creates MSI and NSIS artifacts. Local OpenClaw credentials, Ollama models, conversation history, and indexed files are not part of the build. See [BUILDING.md](BUILDING.md) for repository setup, release signing, and verification steps.
+Mori's Windows packages are built on GitHub-hosted Windows runners. The workflow runs tests, builds the frontend and bundled local service, and creates MSI, NSIS, and a local developer payload. Local OpenClaw credentials, Ollama models, conversation history, and indexed files are not part of the build. See [BUILDING.md](BUILDING.md) for repository setup, local installation, release signing, and verification steps.
 
-Unsigned CI artifacts are for build validation only. A release intended for a Windows device with Smart App Control enabled must have a trusted signature on the Mori executable and installer. Signed release automation remains unavailable until the project is accepted by SignPath Foundation and its GitHub signing settings are configured.
+For personal use on a Windows device with Smart App Control enabled, the same workflow also offers a per-user sparse-MSIX development payload. It signs only the local identity package with a Mori-specific development certificate trusted by the current user; it does not sign a public release or modify Smart App Control. See [BUILDING.md](BUILDING.md#run-mori-locally-with-smart-app-control-enabled) for the install and removal steps.
+
+Unsigned MSI/NSIS CI artifacts are for build validation only. The separate per-user sparse-MSIX route above is a local developer install, not a public release. A release intended for other Windows users still needs a trusted signature on the Mori executable and installer. Signed release automation remains unavailable until the project is accepted by SignPath Foundation and its GitHub signing settings are configured.
 
 ### Code signing policy
 

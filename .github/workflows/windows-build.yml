@@ -67,6 +67,39 @@ jobs:
           }
           [System.IO.File]::WriteAllLines($manifest, $lines, [System.Text.Encoding]::ASCII)
 
+      - name: Stage local developer package payload
+        shell: pwsh
+        env:
+          PACKAGE_VERSION: 0.1.0.${{ github.run_number }}
+        run: |
+          $payload = Join-Path $env:RUNNER_TEMP 'mori-dev-payload'
+          New-Item -ItemType Directory -Path $payload -Force | Out-Null
+          Copy-Item 'src-tauri/target/release/mori-desktop-pet.exe' $payload
+          Copy-Item 'src-tauri/resources' $payload -Recurse
+          New-Item -ItemType Directory -Path (Join-Path $payload 'Assets') -Force | Out-Null
+          Copy-Item 'src-tauri/icons/StoreLogo.png' (Join-Path $payload 'Assets/StoreLogo.png')
+          Copy-Item 'src-tauri/icons/Square150x150Logo.png' (Join-Path $payload 'Assets/Square150x150Logo.png')
+          Copy-Item 'src-tauri/icons/Square44x44Logo.png' (Join-Path $payload 'Assets/Square44x44Logo.png')
+          Copy-Item 'installer/msix/AppxManifest.xml' $payload
+          Copy-Item 'scripts/install-mori-dev.mjs' $payload
+          Copy-Item 'scripts/uninstall-mori-dev.mjs' $payload
+          Copy-Item 'installer/msix/README.zh-CN.md' $payload
+          [System.IO.File]::WriteAllText((Join-Path $payload 'package-version.txt'), $env:PACKAGE_VERSION, [System.Text.Encoding]::ASCII)
+          $archive = Join-Path $env:RUNNER_TEMP 'Mori-Dev-Payload.zip'
+          Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $archive -CompressionLevel Optimal
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText((Join-Path $env:RUNNER_TEMP 'Mori-Dev-Payload-SHA256.txt'), "$hash  Mori-Dev-Payload.zip", [System.Text.Encoding]::ASCII)
+
+      - name: Upload local developer package payload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mori-windows-dev-payload
+          path: |
+            ${{ runner.temp }}/Mori-Dev-Payload.zip
+            ${{ runner.temp }}/Mori-Dev-Payload-SHA256.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload unsigned validation packages
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

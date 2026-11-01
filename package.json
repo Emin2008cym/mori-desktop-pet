@@ -11,7 +11,7 @@
     "lint": "oxlint",
     "test": "node --test",
     "preview": "vite preview --host 127.0.0.1",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "npm run package:backend && tauri dev",
     "tauri:build": "tauri build",
     "package:backend": "node scripts/package-backend.mjs"
   },

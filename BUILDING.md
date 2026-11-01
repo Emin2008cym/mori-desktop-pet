@@ -11,9 +11,20 @@ Keep source and lock-file changes in this repository. Do not add personal knowle
 1. Open the Mori repository on GitHub and select **Actions**.
 2. Select **Windows build** in the workflow list.
 3. Select **Run workflow**, choose the branch, and select **Run workflow** again.
-4. Open the completed run, expand **Artifacts**, and download `mori-windows-unsigned` only to inspect the build output. It is not a trusted install package and may be blocked by Smart App Control.
+4. Open the completed run and expand **Artifacts**. Download `mori-windows-unsigned` only to inspect the MSI/NSIS output; use `mori-windows-dev-payload` for the per-user Mori install described below.
 
-The workflow runs `npm ci`, tests, the frontend build, and Tauri packaging on `windows-2025`. It uploads an MSI, an NSIS setup executable, and their SHA-256 manifest. It does not read Mori user data or connect to a local OpenClaw Gateway.
+The workflow runs `npm ci`, tests, the frontend build, and Tauri packaging on `windows-2025`. It uploads an MSI, an NSIS setup executable, their SHA-256 manifest, and a separate sparse-MSIX developer payload. It does not read Mori user data or connect to a local OpenClaw Gateway.
+
+## Run Mori locally with Smart App Control enabled
+
+For a personal development install, use the workflow's separate `mori-windows-dev-payload` artifact. It contains the Windows-built Mori executable, its bundled Node service/resources, and a local sparse-MSIX installer. The package is signed on your own machine with a Mori-only developer certificate; the installer prompts before adding the public certificate to **Current User\Trusted People** and registering the package identity. It does not change Smart App Control, the machine certificate stores, or `Trusted Root`.
+
+1. Open **Actions > Windows build**, run the workflow, and wait for the green check.
+2. Download **mori-windows-dev-payload** and extract `Mori-Dev-Payload.zip`.
+3. In the extracted folder, open a terminal and run `node install-mori-dev.mjs`.
+4. Read the trust prompt and type `YES` to install. Mori appears in the Start menu as **Mori Desktop Pet**.
+
+This is a per-user development trust path, not public code signing. Keep the private certificate in the current user's certificate store and do not export it. To remove this package and its Mori-only certificate later, run `node uninstall-mori-dev.mjs` from the extracted payload. Mori's local conversation and knowledge data are not removed. If Windows still blocks Mori after package registration, stop there and keep SAC enabled; collect the Code Integrity event rather than changing the policy.
 
 ## Apply for free signing
 

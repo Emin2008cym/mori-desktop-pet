@@ -59,8 +59,8 @@ pub fn run() {
                 let size = monitor.size();
                 let scale = monitor.scale_factor();
                 (
-                    position.x as f64 / scale + size.width as f64 / scale - 262.0,
-                    position.y as f64 / scale + size.height as f64 / scale - 356.0,
+                    position.x as f64 / scale + size.width as f64 / scale - 170.0,
+                    position.y as f64 / scale + size.height as f64 / scale - 190.0,
                 )
             }).unwrap_or((1040.0, 600.0));
 
@@ -70,13 +70,13 @@ pub fn run() {
                 tauri::WebviewUrl::App("index.html?pet=1".into()),
             )
             .title("Mori")
-            .inner_size(250.0, 340.0)
+            .inner_size(150.0, 170.0)
             .position(x, y)
             .transparent(true)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)
-            .resizable(false)
+            .resizable(true)
             .shadow(false)
             .visible(true)
             .build()?;
@@ -118,7 +118,8 @@ pub fn run() {
                 }
                 let resources = app.path().resource_dir()?;
                 let backend_entry = resources.join("server").join("index.mjs");
-                let node_entry = resources.join("binaries").join("node.exe");
+                let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+                let node_entry = resources.join("binaries").join(node_name);
                 let backend = Command::new(node_entry)
                     .arg(backend_entry)
                     .current_dir(&resources)
@@ -160,6 +161,9 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            #[cfg(debug_assertions)]
+            app.autolaunch().disable()?;
+            #[cfg(not(debug_assertions))]
             app.autolaunch().enable()?;
 
             Ok(())

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { emit, listen } from '@tauri-apps/api/event'
-import { LogicalSize, PhysicalPosition, currentMonitor, getAllWindows, getCurrentWindow } from '@tauri-apps/api/window'
+import { LogicalSize, PhysicalPosition, currentMonitor, getAllWindows, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window'
 import { load } from '@tauri-apps/plugin-store'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
@@ -26,6 +26,43 @@ const apiBase = '__TAURI_INTERNALS__' in window ? 'http://127.0.0.1:4179' : ''
 const apiUrl = (path: string) => `${apiBase}${path}`
 const apiFetch = (path: string, init?: RequestInit) => fetch(apiUrl(path), init)
 
+type NativeAck = { requestId: string; ok: boolean; error?: string; conversationId?: string }
+
+function requestNativeAck(
+  eventName: string,
+  ackName: string,
+  payload: Record<string, unknown>,
+  options: { retryMs?: number; timeoutMs?: number } = {},
+): Promise<NativeAck> {
+  const requestId = crypto.randomUUID()
+  const timeoutMs = options.timeoutMs ?? 5000
+  return new Promise((resolve, reject) => {
+    let unlisten: (() => void) | undefined
+    let retryTimer: number | undefined
+    const timeout = window.setTimeout(() => {
+      unlisten?.()
+      if (retryTimer !== undefined) window.clearInterval(retryTimer)
+      reject(new Error('Mori 窗口没有及时响应，请重试。'))
+    }, timeoutMs)
+    const cleanup = () => {
+      window.clearTimeout(timeout)
+      if (retryTimer !== undefined) window.clearInterval(retryTimer)
+      unlisten?.()
+    }
+    void listen<NativeAck>(ackName, (event) => {
+      if (event.payload.requestId !== requestId) return
+      cleanup()
+      if (!event.payload.ok) reject(new Error(event.payload.error || 'Mori 窗口操作失败。'))
+      else resolve(event.payload)
+    }).then((stop) => {
+      unlisten = stop
+      const send = () => { void emit(eventName, { ...payload, requestId }).catch((error) => { cleanup(); reject(error) }) }
+      send()
+      if (options.retryMs) retryTimer = window.setInterval(send, options.retryMs)
+    }).catch((error) => { cleanup(); reject(error) })
+  })
+}
+
 const modeLabels: Record<Mode, string> = { chat: '对话', plan: 'Plan', sketch: 'Sketch' }
 const pageLabels: Record<Page, string> = { overview: '总览', knowledge: '知识库', memory: '记忆', tasks: '任务' }
 
@@ -41,6 +78,9 @@ function DashboardApp() {
   const [confirmDelegateOpen, setConfirmDelegateOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [conversationId, setConversationId] = useState('mori-main')
+  const conversationIdRef = useRef(conversationId)
+  const activePromptRef = useRef(false)
+  const [historyReady, setHistoryReady] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversationSearch, setConversationSearch] = useState('')
   const [conversationResults, setConversationResults] = useState<Array<{ conversationId: string; title: string; messageId: number; role: string; excerpt: string }>>([])
@@ -71,6 +111,7 @@ function DashboardApp() {
   const operationConversationId = useRef(conversationId)
 
   useEffect(() => { operationTextRef.current = operationText }, [operationText])
+  useEffect(() => { conversationIdRef.current = conversationId }, [conversationId])
 
   const refreshConversations = async () => {
     const response = await apiFetch('/api/conversations')
@@ -107,11 +148,13 @@ function DashboardApp() {
         const current = result.conversations?.[0]
         if (!current) return
         setConversationId(current.id)
+        conversationIdRef.current = current.id
         setMode(current.mode || 'chat')
         const history = await apiFetch(`/api/chat/history?conversationId=${encodeURIComponent(current.id)}`)
         const content = await history.json() as { messages?: Array<{ role: 'user' | 'assistant'; content: string }> }
         if (!cancelled) setMessages(content.messages?.length ? content.messages.map((item) => ({ role: item.role, text: item.content })) : [{ role: 'assistant', text: '早上好，我在这里。你可以问我本地资料，也可以让我先和你一起梳理计划。' }])
       } catch { /* The chat remains available if local history cannot be restored. */ }
+      finally { if (!cancelled) setHistoryReady(true) }
     }
     void restore()
     return () => { cancelled = true }
@@ -173,6 +216,7 @@ function DashboardApp() {
     if (!response.ok) return
     const result = await response.json() as { messages?: Array<{ role: 'user' | 'assistant'; content: string }>; conversation?: Conversation }
     setConversationId(id)
+    conversationIdRef.current = id
     setMode(result.conversation?.mode || 'chat')
     setMessages(result.messages?.length ? result.messages.map((item) => ({ role: item.role, text: item.content })) : [{ role: 'assistant', text: '这个会话还没有消息。可以从这里开始。' }])
   }, [])
@@ -188,6 +232,7 @@ function DashboardApp() {
     if (!response.ok) return
     const created = await response.json() as Conversation
     setConversationId(created.id)
+    conversationIdRef.current = created.id
     setMode(created.mode)
     setMessages([{ role: 'assistant', text: '新对话开始了。你希望从哪里开始？' }])
     requestChat(created.mode, created.id)
@@ -211,15 +256,16 @@ function DashboardApp() {
     return () => { active = false; window.clearTimeout(timer) }
   }, [conversationSearch])
 
-  const executePrompt = useCallback(async (prompt: string, promptMode = mode) => {
-    if (!prompt || petStatus === 'thinking') return
+  const executePrompt = useCallback(async (prompt: string, promptMode = mode, targetConversationId = conversationId) => {
+    if (!prompt || activePromptRef.current || petStatus === 'thinking') return false
+    activePromptRef.current = true
     if (!nativeApp || chatWindow) setPanelOpen(true)
     setMessages((current) => [...current, { role: 'user', text: prompt }, { role: 'assistant', text: '' }])
     setPetStatus('thinking')
     try {
       const response = await apiFetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: promptMode, message: prompt, conversationId }),
+        body: JSON.stringify({ mode: promptMode, message: prompt, conversationId: targetConversationId }),
       })
       if (!response.ok || !response.body) throw new Error((await response.text()) || '本地模型暂不可用')
       const reader = response.body.getReader()
@@ -248,10 +294,14 @@ function DashboardApp() {
         }
       }
       setPetStatus('idle')
+      return true
     } catch (error) {
       const detail = error instanceof Error ? error.message : '模型请求失败'
       setMessages((current) => current.map((message, index) => index === current.length - 1 ? { ...message, text: `本地模型暂时没有回应：${detail}` } : message))
       setPetStatus('error')
+      return false
+    } finally {
+      activePromptRef.current = false
     }
   }, [conversationId, mode, petStatus, nativeApp, chatWindow])
   const executePromptRef = useRef(executePrompt)
@@ -288,33 +338,68 @@ function DashboardApp() {
   }
 
   useEffect(() => {
-    if (!nativeApp) return
-    let unlistenPrompt: (() => void) | undefined
+    if (!nativeApp || !historyReady) return
+    let unlistenReady: (() => void) | undefined
+    let unlistenMainReady: (() => void) | undefined
     let unlistenChat: (() => void) | undefined
+    let unlistenPrompt: (() => void) | undefined
     let unlistenWorkbench: (() => void) | undefined
+    const answer = (eventName: string, requestId: string, values: Record<string, unknown> = {}) =>
+      emit(eventName, { requestId, ok: true, ...values })
+
     if (chatWindow) {
-      void listen<{ mode?: Mode; conversationId?: string }>('mori:show-chat', async (event) => {
-        if (event.payload.mode) setMode(event.payload.mode)
-        setPanelOpen(true)
-        if (event.payload.conversationId) await selectConversation(event.payload.conversationId)
-        await getCurrentWindow().show()
-        await getCurrentWindow().setFocus()
-      }).then((unlisten) => { unlistenChat = unlisten })
-      void listen<{ message: string; mode?: Mode }>('mori:prompt', (event) => {
-        setMode(event.payload.mode || 'chat')
-        void executePromptRef.current(event.payload.message, event.payload.mode || 'chat')
-      }).then((unlisten) => { unlistenPrompt = unlisten })
+      void listen<{ requestId: string }>('mori:chat-ready-request', (event) => {
+        void answer('mori:chat-ready', event.payload.requestId, { conversationId: conversationIdRef.current })
+      }).then((stop) => { unlistenReady = stop })
+      void listen<{ mode?: Mode; conversationId?: string; requestId: string }>('mori:show-chat', async (event) => {
+        try {
+          setPanelOpen(true)
+          if (event.payload.conversationId) await selectConversation(event.payload.conversationId)
+          if (event.payload.mode) setMode(event.payload.mode)
+          await getCurrentWindow().show()
+          await getCurrentWindow().setFocus()
+          await answer('mori:show-chat-ack', event.payload.requestId, { conversationId: conversationIdRef.current })
+        } catch (error) {
+          await emit('mori:show-chat-ack', { requestId: event.payload.requestId, ok: false, error: error instanceof Error ? error.message : '聊天窗口无法打开。' })
+        }
+      }).then((stop) => { unlistenChat = stop })
+      void listen<{ message: string; mode: Mode; conversationId: string; requestId: string }>('mori:prompt', async (event) => {
+        try {
+          const { message, mode: promptMode, conversationId: targetId } = event.payload
+          if (!message.trim()) throw new Error('输入内容为空。')
+          if (activePromptRef.current) throw new Error('上一条消息仍在生成，请稍候。')
+          if (targetId !== conversationIdRef.current) await selectConversation(targetId)
+          setMode(promptMode)
+          await getCurrentWindow().show()
+          await getCurrentWindow().setFocus()
+          const response = executePromptRef.current(message, promptMode, targetId)
+          if (!activePromptRef.current) throw new Error('当前会话暂时无法接收消息。')
+          await answer('mori:prompt-accepted', event.payload.requestId, { conversationId: targetId })
+          void response
+        } catch (error) {
+          await emit('mori:prompt-accepted', { requestId: event.payload.requestId, ok: false, error: error instanceof Error ? error.message : '消息未能发送。' })
+        }
+      }).then((stop) => { unlistenPrompt = stop })
     } else {
-      void listen<{ page?: Page; settings?: boolean }>('mori:open-workbench', async (event) => {
-        if (event.payload.page) setPage(event.payload.page)
-        if (event.payload.settings) setSettingsOpen(true)
-        const mainWindow = (await getAllWindows()).find((item) => item.label === 'main')
-        await mainWindow?.show()
-        await mainWindow?.setFocus()
-      }).then((unlisten) => { unlistenWorkbench = unlisten })
+      void listen<{ requestId: string }>('mori:main-ready-request', (event) => {
+        void answer('mori:main-ready', event.payload.requestId)
+      }).then((stop) => { unlistenMainReady = stop })
+      void listen<{ page?: Page; settings?: boolean; requestId: string }>('mori:open-workbench', async (event) => {
+        try {
+          if (event.payload.page) setPage(event.payload.page)
+          if (event.payload.settings) setSettingsOpen(true)
+          const mainWindow = (await getAllWindows()).find((item) => item.label === 'main')
+          if (!mainWindow) throw new Error('工作台窗口不存在。')
+          await mainWindow.show()
+          await mainWindow.setFocus()
+          await answer('mori:open-workbench-ack', event.payload.requestId)
+        } catch (error) {
+          await emit('mori:open-workbench-ack', { requestId: event.payload.requestId, ok: false, error: error instanceof Error ? error.message : '工作台无法打开。' })
+        }
+      }).then((stop) => { unlistenWorkbench = stop })
     }
-    return () => { unlistenPrompt?.(); unlistenChat?.(); unlistenWorkbench?.() }
-  }, [nativeApp, chatWindow, selectConversation])
+    return () => { unlistenReady?.(); unlistenMainReady?.(); unlistenChat?.(); unlistenPrompt?.(); unlistenWorkbench?.() }
+  }, [nativeApp, chatWindow, historyReady, selectConversation])
 
   const connectOpenClaw = async (event: FormEvent) => {
     event.preventDefault()
@@ -693,10 +778,12 @@ function PetWindow() {
   const [mode, setMode] = useState<Mode>('chat')
   const [sending, setSending] = useState(false)
   const [status, setStatus] = useState<PetStatus>('idle')
+  const [actionError, setActionError] = useState('')
   const hideTimer = useRef<number | undefined>(undefined)
-  const inputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLFormElement>(null)
   const hoveredRef = useRef(false)
+  const layoutChanging = useRef(false)
+  const layoutGeneration = useRef(0)
   const anchorPosition = useRef<{ x: number; y: number } | undefined>(undefined)
   const expandedOffset = useRef({ x: 0, y: 0 })
 
@@ -708,7 +795,20 @@ function PetWindow() {
     void (async () => {
       const store = await load('mori-settings.json', { autoSave: true })
       const saved = await store.get<{ x: number; y: number }>('petPosition')
-      if (saved) await getCurrentWindow().setPosition(new PhysicalPosition(saved.x, saved.y))
+      if (saved) {
+        const monitor = await primaryMonitor()
+        const scale = await getCurrentWindow().scaleFactor()
+        const minX = monitor?.position.x ?? 0
+        const minY = monitor?.position.y ?? 0
+        const maxX = monitor ? minX + monitor.size.width - 150 * scale : saved.x
+        const maxY = monitor ? minY + monitor.size.height - 170 * scale : saved.y
+        const restored = {
+          x: Math.max(minX, Math.min(maxX, saved.x)),
+          y: Math.max(minY, Math.min(maxY, saved.y)),
+        }
+        anchorPosition.current = restored
+        await getCurrentWindow().setPosition(new PhysicalPosition(restored.x, restored.y))
+      }
       unlistenMoved = await getCurrentWindow().onMoved(({ payload }) => {
         const position = hoveredRef.current
           ? { x: payload.x + expandedOffset.current.x, y: payload.y + expandedOffset.current.y }
@@ -722,18 +822,47 @@ function PetWindow() {
 
   useEffect(() => {
     window.clearTimeout(hideTimer.current)
+    const generation = ++layoutGeneration.current
+    layoutChanging.current = true
     void (async () => {
       const petWindow = getCurrentWindow()
+      const resizeTo = async (width: number, height: number, scale: number) => {
+        const reachedTarget = (size: { width: number; height: number }) =>
+          Math.abs(size.width - width * scale) <= width * scale * 0.1 &&
+          Math.abs(size.height - height * scale) <= height * scale * 0.1
+        if (reachedTarget(await petWindow.innerSize())) return
+
+        let signalResize: () => void = () => undefined
+        const resized = new Promise<void>((resolve) => { signalResize = resolve })
+        const unlisten = await petWindow.onResized(({ payload }) => {
+          if (reachedTarget(payload)) signalResize()
+        })
+        const timeout = window.setTimeout(signalResize, 2000)
+        try {
+          await petWindow.setSize(new LogicalSize(width, height))
+          if (!reachedTarget(await petWindow.innerSize())) await resized
+        } finally {
+          window.clearTimeout(timeout)
+          unlisten()
+        }
+
+        const actualSize = await petWindow.innerSize()
+        if (!reachedTarget(actualSize)) {
+          const actualWidth = Math.round(actualSize.width / scale)
+          const actualHeight = Math.round(actualSize.height / scale)
+          throw new Error(`Ubuntu 窗口管理器没有应用尺寸请求，目标 ${width}×${height}，实际 ${actualWidth}×${actualHeight}。`)
+        }
+      }
       const currentPosition = await petWindow.innerPosition()
       if (hovered) {
         hoveredRef.current = true
         anchorPosition.current ||= { x: currentPosition.x, y: currentPosition.y }
         const scale = await petWindow.scaleFactor()
         const monitor = await currentMonitor()
-        const width = 440
-        const height = 450
-        const offsetX = 95 * scale
-        const offsetY = 55 * scale
+        const width = 500
+        const height = 540
+        const offsetX = 165 * scale
+        const offsetY = 125 * scale
         expandedOffset.current = { x: offsetX, y: offsetY }
         let x = anchorPosition.current.x - offsetX
         let y = anchorPosition.current.y - offsetY
@@ -746,14 +875,29 @@ function PetWindow() {
           y = Math.max(top, Math.min(bottom, y))
           expandedOffset.current = { x: anchorPosition.current.x - x, y: anchorPosition.current.y - y }
         }
-        await petWindow.setSize(new LogicalSize(width, height))
+        await resizeTo(width, height, scale)
         await petWindow.setPosition(new PhysicalPosition(x, y))
       } else {
         hoveredRef.current = false
-        await petWindow.setSize(new LogicalSize(250, 340))
+        const scale = await petWindow.scaleFactor()
+        await resizeTo(150, 170, scale)
         if (anchorPosition.current) await petWindow.setPosition(new PhysicalPosition(anchorPosition.current.x, anchorPosition.current.y))
       }
-    })().catch(() => undefined)
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      if (layoutGeneration.current === generation) layoutChanging.current = false
+    })().catch((error) => {
+      if (layoutGeneration.current !== generation) return
+      layoutChanging.current = false
+      if (hovered) {
+        let message = error instanceof Error ? error.message : String(error)
+        if (!message || message === '[object Object]') {
+          try { message = JSON.stringify(error) } catch { message = '窗口尺寸调整失败。' }
+        }
+        setActionError(message)
+        setStatus('error')
+        console.error('Mori pet window could not expand:', error)
+      }
+    })
   }, [hovered])
 
   const send = async (event: FormEvent) => {
@@ -761,78 +905,109 @@ function PetWindow() {
     const message = draft.trim()
     if (!message || sending) return
     setSending(true)
-    setStatus('thinking')
-    setDraft('')
-    await emit('mori:prompt', { message, mode })
-    window.setTimeout(() => setSending(false), 800)
+    setActionError('')
+    try {
+      const conversationId = await openChat(mode)
+      await requestNativeAck('mori:prompt', 'mori:prompt-accepted', { message, mode, conversationId })
+      setDraft('')
+      setStatus('thinking')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '消息没有发送成功。')
+      setStatus('error')
+    } finally {
+      setSending(false)
+    }
   }
 
   const show = () => { window.clearTimeout(hideTimer.current); hoveredRef.current = true; setHovered(true) }
   const hide = () => {
     window.clearTimeout(hideTimer.current)
-    hideTimer.current = window.setTimeout(() => {
+    const collapse = () => {
+      if (layoutChanging.current) {
+        hideTimer.current = window.setTimeout(collapse, 180)
+        return
+      }
       if (composerRef.current?.contains(document.activeElement)) return
       hoveredRef.current = false
       setHovered(false)
-    }, 450)
+    }
+    hideTimer.current = window.setTimeout(collapse, 500)
   }
-  const dismiss = () => { setHovered(false) }
+  const dismiss = () => { window.clearTimeout(hideTimer.current); hoveredRef.current = false; setHovered(false) }
 
   const openChat = async (nextMode: Mode) => {
-    setMode(nextMode)
-    dismiss()
     const petWindow = getCurrentWindow()
     const chatWindow = (await getAllWindows()).find((item) => item.label === 'chat')
-    if (!chatWindow) return
-    const petPosition = await petWindow.innerPosition()
-    const petSize = await petWindow.innerSize()
+    if (!chatWindow) throw new Error('聊天窗口不存在。')
+    // Hidden WebViews may not start their event loop until they are shown.
+    await chatWindow.show()
+    await chatWindow.setFocus()
+    const ready = await requestNativeAck('mori:chat-ready-request', 'mori:chat-ready', {}, { retryMs: 200, timeoutMs: 10000 })
+    const conversationId = ready.conversationId || 'mori-main'
+    const petPosition = anchorPosition.current || await petWindow.innerPosition()
     const scale = await petWindow.scaleFactor()
     const monitor = await currentMonitor()
     const chatWidth = 440
     const chatHeight = 650
     const gap = 12 * scale
+    const petWidth = 150 * scale
+    const petHeight = 170 * scale
     const bounds = monitor ? {
       left: monitor.position.x,
       top: monitor.position.y,
       right: monitor.position.x + monitor.size.width,
       bottom: monitor.position.y + monitor.size.height,
     } : undefined
-    let x = petPosition.x + petSize.width + gap
-    let y = petPosition.y + petSize.height / 2 - chatHeight * scale / 2
+    let x = petPosition.x + petWidth + gap
+    let y = petPosition.y + petHeight / 2 - chatHeight * scale / 2
     if (bounds && x + chatWidth * scale > bounds.right) x = petPosition.x - chatWidth * scale - gap
     if (bounds) {
       x = Math.max(bounds.left, Math.min(bounds.right - chatWidth * scale, x))
       y = Math.max(bounds.top, Math.min(bounds.bottom - chatHeight * scale, y))
     }
-    await chatWindow.setSize(new LogicalSize(chatWidth, chatHeight))
-    await chatWindow.setPosition(new PhysicalPosition(x, y))
-    await chatWindow.show()
+    try { await chatWindow.setPosition(new PhysicalPosition(x, y)) } catch { /* Some compositors choose window placement. */ }
     await chatWindow.setFocus()
-    await emit('mori:show-chat', { mode: nextMode })
+    await requestNativeAck('mori:show-chat', 'mori:show-chat-ack', { mode: nextMode, conversationId })
+    setMode(nextMode)
+    dismiss()
+    return conversationId
   }
 
   const openWorkbench = async (page: Page = 'overview', settings = false) => {
+    const mainWindow = (await getAllWindows()).find((item) => item.label === 'main')
+    if (!mainWindow) throw new Error('工作台窗口不存在。')
+    await mainWindow.show()
+    await mainWindow.setFocus()
+    await requestNativeAck('mori:main-ready-request', 'mori:main-ready', {}, { retryMs: 200, timeoutMs: 10000 })
+    await requestNativeAck('mori:open-workbench', 'mori:open-workbench-ack', { page, settings })
     dismiss()
-    await emit('mori:open-workbench', { page, settings })
+  }
+
+  const launch = (action: () => Promise<unknown>) => {
+    setActionError('')
+    void action().catch((error) => {
+      setActionError(error instanceof Error ? error.message : 'Mori 窗口操作失败。')
+      setStatus('error')
+    })
   }
 
   const menuItems = [
-    { label: '对话', icon: <MessageCircle size={16} />, run: () => void openChat('chat') },
-    { label: 'Plan', icon: <WandSparkles size={16} />, run: () => void openChat('plan') },
-    { label: 'Sketch', icon: <Command size={16} />, run: () => void openChat('sketch') },
-    { label: '知识库', icon: <BookOpen size={16} />, run: () => void openWorkbench('knowledge') },
-    { label: '记忆/历史', icon: <Archive size={16} />, run: () => void openWorkbench('memory') },
-    { label: 'OpenClaw', icon: <Activity size={16} />, run: () => void openWorkbench('tasks', true) },
-    { label: '设置', icon: <Settings2 size={16} />, run: () => void openWorkbench('overview', true) },
-    { label: '工作台', icon: <Layers3 size={16} />, run: () => void openWorkbench('overview') },
+    { label: '对话', icon: <MessageCircle size={17} />, run: () => launch(() => openChat('chat')) },
+    { label: 'Plan', icon: <WandSparkles size={17} />, run: () => launch(() => openChat('plan')) },
+    { label: 'Sketch', icon: <Command size={17} />, run: () => launch(() => openChat('sketch')) },
+    { label: '知识库', icon: <BookOpen size={17} />, run: () => launch(() => openWorkbench('knowledge')) },
+    { label: '记忆/历史', icon: <Archive size={17} />, run: () => launch(() => openWorkbench('memory')) },
+    { label: 'OpenClaw', icon: <Activity size={17} />, run: () => launch(() => openWorkbench('tasks', true)) },
+    { label: '设置', icon: <Settings2 size={17} />, run: () => launch(() => openWorkbench('overview', true)) },
+    { label: '工作台', icon: <Layers3 size={17} />, run: () => launch(() => openWorkbench('overview')) },
   ]
 
   return <main className={`native-pet-root ${hovered ? 'is-expanded' : ''}`} onMouseEnter={show} onMouseLeave={hide}>
-    <div className="native-pet-toolbar"><span className="native-pet-brand"><i />MORI <small>LOCAL</small></span><div><button title="移动桌宠" onPointerDown={(event) => { event.preventDefault(); void getCurrentWindow().startDragging() }}><Move size={13} /></button><button title="打开工作台" onClick={() => void openWorkbench()}><ArrowUpRight size={14} /></button></div></div>
+    <div className="native-pet-toolbar"><button title="按住拖动桌宠" aria-label="移动桌宠" onPointerDown={(event) => { event.preventDefault(); void getCurrentWindow().startDragging() }}><Move size={18} /></button><button title="打开工作台" aria-label="打开工作台" onClick={() => launch(() => openWorkbench())}><ArrowUpRight size={18} /></button></div>
     {hovered && <nav className="native-pet-menu" aria-label="Mori 快捷菜单">{menuItems.map((item, index) => <button key={item.label} className={`native-pet-menu-item menu-${index}`} title={item.label} onClick={item.run}><span>{item.icon}</span><small>{item.label}</small></button>)}</nav>}
-    <button className={`native-pet-avatar status-${status}`} title="点击打开对话" onClick={() => void openChat('chat')}><img src={status === 'thinking' ? '/mori-thinking-transparent.png' : '/mori-wildman-transparent.png'} alt={status === 'thinking' ? 'Mori 正在思考' : '黑白野人 Mori 桌宠'} /></button>
-    <div className="native-pet-caption">{status === 'thinking' ? <><LoaderCircle size={12} className="spin" />正在思考</> : status === 'indexing' ? <><Database size={12} />正在整理资料</> : status === 'operating' ? <><Activity size={12} />正在操作桌面</> : status === 'waiting' ? <><Clock3 size={12} />等你确认</> : status === 'error' ? <><CircleHelp size={12} />需要检查</> : '桌面上的私人 AI'}</div>
-    {hovered && <form ref={composerRef} className="native-pet-composer" onSubmit={send} onMouseEnter={show} onFocusCapture={show} onBlurCapture={hide}><div className="native-pet-composer-top"><div className="native-pet-modes">{(['chat','plan','sketch'] as Mode[]).map((item) => <button key={item} type="button" className={mode === item ? 'selected' : ''} onClick={() => setMode(item)}>{modeLabels[item]}</button>)}</div><button type="button" className="native-pet-close" title="收起输入框" onClick={dismiss}><X size={13} /></button></div><div className="native-pet-input"><input ref={inputRef} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') dismiss() }} onBlur={hide} placeholder={mode === 'plan' ? '要完成什么？' : mode === 'sketch' ? '接着输入想法…' : '问 Mori…'} /><button disabled={!draft.trim() || sending} title="发送提示" aria-label="发送提示"><ArrowUp size={15} /></button></div></form>}
+    <button className={`native-pet-avatar status-${status}`} title="点击打开对话" onClick={() => launch(() => openChat('chat'))}><img src={status === 'thinking' ? '/mori-thinking-transparent.png' : '/mori-wildman-transparent.png'} alt={status === 'thinking' ? 'Mori 正在思考' : '黑白野人 Mori 桌宠'} /></button>
+    <div className={`native-pet-caption ${status === 'error' ? 'is-error' : ''}`} title={actionError || undefined}>{actionError || (status === 'thinking' ? <><LoaderCircle size={12} className="spin" />正在思考</> : status === 'indexing' ? <><Database size={12} />正在整理资料</> : status === 'operating' ? <><Activity size={12} />正在操作桌面</> : status === 'waiting' ? <><Clock3 size={12} />等你确认</> : status === 'error' ? <><CircleHelp size={12} />需要检查</> : 'Mori')}</div>
+    {hovered && <form ref={composerRef} className="native-pet-composer" onSubmit={send} onMouseEnter={show} onFocusCapture={show} onBlurCapture={hide}><div className="native-pet-composer-top"><div className="native-pet-modes">{(['chat','plan','sketch'] as Mode[]).map((item) => <button key={item} type="button" className={mode === item ? 'selected' : ''} onClick={() => setMode(item)}>{modeLabels[item]}</button>)}</div><button type="button" className="native-pet-close" title="收起输入框" onClick={dismiss}><X size={13} /></button></div><div className="native-pet-input"><input value={draft} onChange={(event) => { setDraft(event.target.value); setActionError('') }} onKeyDown={(event) => { if (event.key === 'Escape') dismiss() }} placeholder={mode === 'plan' ? '要完成什么？' : mode === 'sketch' ? '接着输入想法…' : '问 Mori…'} /><button disabled={!draft.trim() || sending} title="发送提示" aria-label="发送提示"><ArrowUp size={15} /></button></div></form>}
     <div className="native-pet-local"><LockKeyhole size={10} />本机运行</div>
   </main>
 }
