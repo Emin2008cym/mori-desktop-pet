@@ -13,8 +13,6 @@ import mammoth from 'mammoth'
 
 const app = express()
 const port = Number(process.env.MORI_PORT || 4179)
-const configuredPortCount = Number(process.env.MORI_PORT_COUNT || 1)
-const portCount = Number.isInteger(configuredPortCount) ? Math.max(1, Math.min(32, configuredPortCount)) : 1
 const serviceInstanceId = process.env.MORI_INSTANCE_ID || randomUUID()
 const ollamaUrl = process.env.OLLAMA_URL || 'http://127.0.0.1:11434'
 const model = process.env.MORI_MODEL || 'qwen3.5:4b'
@@ -837,24 +835,16 @@ app.get('/api/events', (req, res) => {
 })
 
 let server
-function listenOnAvailablePort(candidate = port) {
-  const currentServer = app.listen(candidate, '127.0.0.1', () => {
-    server = currentServer
-    const address = currentServer.address()
-    const actualPort = typeof address === 'object' && address ? address.port : candidate
-    console.log(`MORI_READY ${actualPort}`)
-    console.log(`Mori local service listening on http://127.0.0.1:${actualPort}`)
-  })
-  currentServer.once('error', (error) => {
-    if (error.code === 'EADDRINUSE' && candidate < port + portCount - 1) {
-      listenOnAvailablePort(candidate + 1)
-      return
-    }
-    console.error(`Mori local service failed to bind 127.0.0.1:${candidate}: ${error.message}`)
-    process.exit(1)
-  })
-}
-listenOnAvailablePort()
+server = app.listen(port, '127.0.0.1', () => {
+  const address = server.address()
+  const actualPort = typeof address === 'object' && address ? address.port : port
+  console.log(`MORI_READY ${actualPort}`)
+  console.log(`Mori local service listening on http://127.0.0.1:${actualPort}`)
+})
+server.once('error', (error) => {
+  console.error(`Mori local service failed to bind 127.0.0.1:${port}: ${error.message}`)
+  process.exit(1)
+})
 for (const row of database.prepare('SELECT path FROM knowledge_roots').all()) watchKnowledgeRoot(row.path)
 const rootScanInterval = setInterval(() => { void scanKnowledgeRoots().catch(() => undefined) }, 5 * 60 * 1000)
 function shutdown() {

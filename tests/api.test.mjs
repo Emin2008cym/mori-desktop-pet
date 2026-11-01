@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { createServer as createHttpServer } from 'node:http'
-import { createServer } from 'node:net'
 
 let child
 let apiOutput = ''
@@ -22,7 +21,7 @@ function startApi() {
   apiOutput = ''
   child = spawn(process.execPath, ['server/index.mjs'], {
     cwd: new URL('..', import.meta.url),
-    env: { ...process.env, MORI_PORT: String(apiPort), MORI_PORT_COUNT: '1', MORI_INSTANCE_ID: instanceId, MORI_DATA_DIR: dataDirectory, OLLAMA_URL: ollamaUrl },
+    env: { ...process.env, MORI_PORT: '0', MORI_INSTANCE_ID: instanceId, MORI_DATA_DIR: dataDirectory, OLLAMA_URL: ollamaUrl },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   child.stdout.setEncoding('utf8').on('data', (data) => { apiOutput += data })
@@ -34,14 +33,6 @@ async function stopApi() {
   if (!child || child.exitCode !== null) return
   child.kill()
   await Promise.race([new Promise((resolve) => child.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 2500))])
-}
-
-async function freePort() {
-  const socket = createServer()
-  await new Promise((resolve, reject) => socket.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()))
-  const { port } = socket.address()
-  await new Promise((resolve, reject) => socket.close((error) => error ? reject(error) : resolve()))
-  return port
 }
 
 function createTextPdf(text) {
@@ -65,21 +56,24 @@ function createTextPdf(text) {
   return Buffer.from(pdf, 'ascii')
 }
 
-async function waitForServer(url) {
+async function waitForServer() {
   const expires = Date.now() + 8000
   while (Date.now() < expires) {
-    try {
-      const response = await fetch(`${url}/api/knowledge/documents`, { signal: AbortSignal.timeout(250) })
-      if (response.ok) return
-    } catch { /* The child is still binding its local port. */ }
+    const port = apiOutput.match(/MORI_READY (\d+)/)?.[1]
+    if (port) {
+      apiPort = Number(port)
+      baseUrl = `http://127.0.0.1:${apiPort}`
+      try {
+        const response = await fetch(`${baseUrl}/api/knowledge/documents`, { signal: AbortSignal.timeout(250) })
+        if (response.ok) return
+      } catch { /* The child has announced its port and is finishing startup. */ }
+    }
     await new Promise((resolve) => setTimeout(resolve, 80))
   }
   throw new Error(`Local API failed to start. ${apiOutput}`)
 }
 
 before(async () => {
-  apiPort = await freePort()
-  baseUrl = `http://127.0.0.1:${apiPort}`
   dataDirectory = await mkdtemp(join(tmpdir(), 'mori-api-test-'))
   ollamaMock = createHttpServer((request, response) => {
     if (request.url === '/api/tags') {
