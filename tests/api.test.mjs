@@ -8,20 +8,25 @@ import { createServer as createHttpServer } from 'node:http'
 import { createServer } from 'node:net'
 
 let child
+let apiOutput = ''
 let baseUrl
 let dataDirectory
 let apiPort
+const instanceId = 'mori-api-test-instance'
 let ollamaMock
 let ollamaUrl
 let lastChatPayload
 const chatPayloads = []
 
 function startApi() {
+  apiOutput = ''
   child = spawn(process.execPath, ['server/index.mjs'], {
     cwd: new URL('..', import.meta.url),
-    env: { ...process.env, MORI_PORT: String(apiPort), MORI_DATA_DIR: dataDirectory, OLLAMA_URL: ollamaUrl },
-    stdio: 'ignore',
+    env: { ...process.env, MORI_PORT: String(apiPort), MORI_PORT_COUNT: '1', MORI_INSTANCE_ID: instanceId, MORI_DATA_DIR: dataDirectory, OLLAMA_URL: ollamaUrl },
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
+  child.stdout.setEncoding('utf8').on('data', (data) => { apiOutput += data })
+  child.stderr.setEncoding('utf8').on('data', (data) => { apiOutput += data })
   return waitForServer(baseUrl)
 }
 
@@ -69,7 +74,7 @@ async function waitForServer(url) {
     } catch { /* The child is still binding its local port. */ }
     await new Promise((resolve) => setTimeout(resolve, 80))
   }
-  throw new Error('Local API failed to start.')
+  throw new Error(`Local API failed to start. ${apiOutput}`)
 }
 
 before(async () => {
@@ -77,6 +82,10 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${apiPort}`
   dataDirectory = await mkdtemp(join(tmpdir(), 'mori-api-test-'))
   ollamaMock = createHttpServer((request, response) => {
+    if (request.url === '/api/tags') {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ models: [{ name: 'qwen3.5:4b' }, { name: 'nomic-embed-text:latest' }] }))
+      return
+    }
     if (request.url === '/api/embed') {
       response.writeHead(404).end()
       return
@@ -108,6 +117,17 @@ after(async () => {
   await stopApi()
   if (ollamaMock?.listening) await new Promise((resolve) => ollamaMock.close(resolve))
   if (dataDirectory) await rm(dataDirectory, { recursive: true, force: true })
+})
+
+test('health identifies this service instance and confirms the configured Ollama model', async () => {
+  const response = await fetch(`${baseUrl}/api/health`)
+  const health = await response.json()
+  assert.equal(response.ok, true)
+  assert.equal(health.serviceVersion, 2)
+  assert.equal(health.serviceInstanceId, instanceId)
+  assert.equal(health.ollama, true)
+  assert.equal(health.model, true)
+  assert.equal(health.modelName, 'qwen3.5:4b')
 })
 
 test('knowledge files can be indexed, searched locally, listed, and removed', async () => {
@@ -285,20 +305,28 @@ test('images are described by local vision and audio/video are indexed as metada
   assert.equal(videoSearch.results.length, 1)
 })
 
-test('desktop delegation is unavailable unless the OpenClaw operator session is connected', async () => {
-  const response = await fetch(`${baseUrl}/api/openclaw/delegate`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: 'Open the browser' }),
-  })
-  assert.equal(response.status, 503)
-})
+test('desktop task session is limited to trusted Mori origins and authenticated requests', async () => {
+  const deniedSession = await fetch(`${baseUrl}/api/desktop/session`, { headers: { Origin: 'https://example.com' } })
+  assert.equal(deniedSession.status, 403)
+  const deniedTasks = await fetch(`${baseUrl}/api/desktop/tasks`, { headers: { Origin: 'http://127.0.0.1:5173' } })
+  assert.equal(deniedTasks.status, 403)
+  const removedConnector = await fetch(`${baseUrl}/api/openclaw/delegate`, { method: 'POST' })
+  assert.equal(removedConnector.status, 404)
 
-test('desktop reports are labeled unverified and appended to the local conversation', async () => {
-  const response = await fetch(`${baseUrl}/api/openclaw/report`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: '我已打开目标页面。' }),
+  const session = await fetch(`${baseUrl}/api/desktop/session`, { headers: { Origin: 'http://127.0.0.1:5173' } }).then((response) => response.json())
+  assert.equal(typeof session.token, 'string')
+  const response = await fetch(`${baseUrl}/api/desktop/tasks`, {
+    method: 'POST', headers: { Origin: 'http://127.0.0.1:5173', 'X-Mori-Desktop-Session': session.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: '打开记事本', conversationId: 'mori-main' }),
   })
-  assert.equal(response.status, 200)
-  const history = await fetch(`${baseUrl}/api/chat/history`).then((result) => result.json())
-  assert.equal(history.messages.at(-1).role, 'assistant')
-  assert.match(history.messages.at(-1).content, /未验证的 OpenClaw 桌面执行报告/)
-  assert.match(history.messages.at(-1).content, /尚未独立验证屏幕状态/)
+  assert.equal(response.status, process.platform === 'win32' ? 201 : 501)
+  if (response.status === 201) {
+    const created = await response.json()
+    assert.equal(created.task.state, 'awaiting_confirmation')
+    const unconfirmed = await fetch(`${baseUrl}/api/desktop/tasks/${created.task.id}/control`, {
+      method: 'POST', headers: { Origin: 'http://127.0.0.1:5173', 'X-Mori-Desktop-Session': session.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', confirmed: false }),
+    })
+    assert.equal(unconfirmed.status, 400)
+  }
 })

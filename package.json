@@ -16,8 +16,6 @@
     "package:backend": "node scripts/package-backend.mjs"
   },
   "dependencies": {
-    "@openclaw/gateway-client": "2026.10.8",
-    "@openclaw/gateway-protocol": "2026.10.8",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-dialog": "^2.8.4",

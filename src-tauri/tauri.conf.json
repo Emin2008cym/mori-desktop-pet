@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:4179 ws://127.0.0.1:18789"
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:4179 http://127.0.0.1:4180 http://127.0.0.1:4181 http://127.0.0.1:4182 http://127.0.0.1:4183 http://127.0.0.1:4184 http://127.0.0.1:4185 http://127.0.0.1:4186 http://127.0.0.1:4187 http://127.0.0.1:4188 http://127.0.0.1:4189 http://127.0.0.1:4190 http://127.0.0.1:4191 http://127.0.0.1:4192 http://127.0.0.1:4193 http://127.0.0.1:4194"
     }
   },
   "bundle": {

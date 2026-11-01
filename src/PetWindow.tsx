@@ -3,17 +3,17 @@ import { flushSync } from 'react-dom'
 import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize, PhysicalPosition, currentMonitor, getAllWindows, getCurrentWindow, primaryMonitor } from '@tauri-apps/api/window'
 import { load } from '@tauri-apps/plugin-store'
-import { Activity, Archive, ArrowUp, BookOpen, Command, Layers3, LoaderCircle, MessageCircle, Move, Settings2, WandSparkles, X } from 'lucide-react'
+import { Archive, ArrowUp, BookOpen, Command, Layers3, LoaderCircle, MessageCircle, Monitor, Move, Settings2, WandSparkles, X } from 'lucide-react'
 import { streamChat, type ChatMode } from './chat-stream'
 import { petLayout } from './pet-layout'
 import { requestNativeAck } from './native-events'
+import { apiUrl } from './api'
 import './PetWindow.css'
 
 type Message = { role: 'user' | 'assistant'; text: string; memorySuggestion?: string }
 const labels = { chat: '对话', plan: 'Plan', sketch: 'Sketch' }
-const base = '__TAURI_INTERNALS__' in window ? 'http://127.0.0.1:4179' : ''
 async function json(path: string, init?: RequestInit) {
-  const response = await fetch(`${base}${path}`, init)
+  const response = await fetch(apiUrl(path), init)
   const result = await response.json()
   if (!response.ok) throw new Error(result.error || '本地服务暂时不可用')
   return result
@@ -144,12 +144,13 @@ export default function PetWindow() {
     setDraft('')
     setMessages((current) => [...current, { role: 'user', text: message }, { role: 'assistant', text: '' }])
     try {
-      await streamChat(`${base}/api/chat`, { message, mode, conversationId: conversationId.current }, (text, memorySuggestion) => {
+      await streamChat(apiUrl('/api/chat'), { message, mode, conversationId: conversationId.current }, (text, memorySuggestion) => {
         setMessages((current) => current.map((item, index) => index === current.length - 1 ? { role: 'assistant', text, memorySuggestion } : item))
       })
       void emit('mori:conversation-updated', { conversationId: conversationId.current })
     } catch (reason) {
       const detail = reason instanceof Error && reason.message !== 'Failed to fetch' ? reason.message : '本地服务没有连接。请退出并重新启动 Mori；若仍失败，请查看启动日志。'
+      setDraft((current) => current || message)
       setError(detail)
       setMessages((current) => current.map((item, index) => index === current.length - 1 ? { ...item, text: detail } : item))
     } finally { sending.current = false; setBusy(false) }
@@ -177,7 +178,7 @@ export default function PetWindow() {
     { title: 'Sketch', Icon: Command, run: () => openChat('sketch') },
     { title: '知识库', Icon: BookOpen, run: () => void workbench('knowledge') },
     { title: '记忆', Icon: Archive, run: () => void workbench('memory') },
-    { title: 'OpenClaw', Icon: Activity, run: () => void workbench('tasks', true) },
+    { title: '桌面任务', Icon: Monitor, run: () => void workbench('tasks') },
     { title: '设置', Icon: Settings2, run: () => void workbench('overview', true) },
     { title: '工作台', Icon: Layers3, run: () => void workbench() },
   ]

@@ -13,6 +13,7 @@ dist-ssr
 *.local
 src-tauri/target/
 src-tauri/resources/
+src-tauri/gen/schemas/
 .mori-root-test-*/
 mori-app-control-handoff.txt
 

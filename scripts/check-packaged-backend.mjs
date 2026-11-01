@@ -25,7 +25,7 @@ test('isolated shipped runtime starts and indexes a PDF with optional native can
     await new Promise((resolve) => reserve.close(resolve))
     child = spawn(join(runtime, 'binaries', process.platform === 'win32' ? 'node.exe' : 'node'), [join(runtime, 'server', 'index.mjs')], {
       cwd: runtime,
-      env: { ...process.env, NODE_PATH: '', MORI_DATA_DIR: join(temporary, 'data'), MORI_PORT: String(port), MORI_AUTOCONNECT_OPENCLAW: '0', OLLAMA_URL: 'http://127.0.0.1:1' },
+      env: { ...process.env, NODE_PATH: '', MORI_DATA_DIR: join(temporary, 'data'), MORI_PORT: String(port), OLLAMA_URL: 'http://127.0.0.1:1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     child.stdout.on('data', (data) => { log += data })

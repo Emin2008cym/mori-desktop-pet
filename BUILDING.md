@@ -13,7 +13,7 @@ Keep source and lock-file changes in this repository. Do not add personal knowle
 3. Select **Run workflow**, choose the branch, and select **Run workflow** again.
 4. Open the completed run and expand **Artifacts**. Download `mori-windows-unsigned` only to inspect the MSI/NSIS output; use `mori-windows-dev-payload` for the per-user Mori install described below.
 
-The workflow runs `npm ci`, tests, the frontend build, and Tauri packaging on `windows-2025`. It uploads an MSI, an NSIS setup executable, their SHA-256 manifest, and a separate portable developer payload. It does not read Mori user data or connect to a local OpenClaw Gateway.
+The workflow runs `npm ci`, tests, the frontend build, and Tauri packaging on `windows-2025`. It uploads an MSI, an NSIS setup executable, their SHA-256 manifest, and a separate portable developer payload. It does not read Mori user data, connect to Ollama, or connect to OpenClaw Gateway.
 
 ## Run Mori locally with Smart App Control enabled
 
@@ -41,7 +41,7 @@ After the first public Windows release:
 5. Open **Settings > Secrets and variables > Actions**. Add `SIGNPATH_API_TOKEN` as a repository secret. Add `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_APP_CONFIGURATION` (`app-executable`), and `SIGNPATH_INSTALLER_CONFIGURATION` (`windows-installers`) as repository variables. Never put the API token in a workflow file or commit it.
 6. In SignPath, enable manual approval for the release signing policy and configure its GitHub origin checks to require GitHub-hosted runners.
 
-The signed workflow signs the Mori executable first, verifies it, then packages that signed file into MSI and NSIS installers and submits those installer files for signing. The Windows Credential Manager integration is statically linked into the Mori executable, and the packaged Node service is checked to contain no native `.node` add-ons. A separate, write-enabled job attaches the verified files to the existing GitHub release. The signing job has read-only GitHub permissions. The package configuration and policy slugs must match the values created in SignPath.
+The signed workflow signs the Mori executable first, verifies it, then packages that signed file into MSI and NSIS installers and submits those installer files for signing. The packaged Node service is checked to contain no native `.node` add-ons. A separate, write-enabled job attaches the verified files to the existing GitHub release. The signing job has read-only GitHub permissions. The package configuration and policy slugs must match the values created in SignPath.
 
 ## Publish and install a signed release
 
@@ -49,6 +49,6 @@ The signed workflow signs the Mori executable first, verifies it, then packages 
 2. In GitHub, open **Actions > Signed Windows release > Run workflow**, enter the existing release tag, then start the workflow.
 3. Approve the run in the GitHub `release-signing` environment. If SignPath requests approval, review and approve the signing request there as well.
 4. Verify the uploaded `SHA256SUMS.txt` against the downloaded MSI and NSIS setup file. In Windows, check the Mori executable and each installer file's **Properties > Digital Signatures** tab before installation.
-5. Keep Smart App Control enabled. Install one signed package and confirm Mori starts. Then connect to the existing local OpenClaw Gateway and test a supervised desktop task, pause, and result return.
+5. Keep Smart App Control enabled. Install one signed package and confirm Mori starts. Verify Ollama connectivity, then test a supervised task using the built-in Windows executor, including pause, takeover, approval, and result return.
 
 If SignPath does not accept the project, do not distribute unsigned packages as trusted installers. The fallback is private Microsoft Store distribution as MSIX, which requires a separate packaging adaptation and Store certification.

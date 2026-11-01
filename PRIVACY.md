@@ -6,23 +6,23 @@ Mori is a local-first Windows desktop application. It does not operate a hosted 
 
 ## Information stored on your device
 
-Mori stores conversation messages, conversation titles and summaries, modes, confirmed long-term memories, selected knowledge-folder paths, indexed file metadata, extracted document text, and image descriptions in its local application data directory. Audio and video files are recorded as metadata only. Mori scans only folders you authorize. Browser passwords, cookies, and application credentials are not indexed.
+Mori stores conversation messages, conversation titles and summaries, modes, confirmed long-term memories, selected knowledge-folder paths, indexed file metadata, extracted document text, image descriptions, and desktop task prompts, events, and results in its local application data directory. Audio and video files are recorded as metadata only. Mori scans only folders you authorize. Browser passwords, cookies, and application credentials are not indexed.
 
-OpenClaw device identity and device-auth credentials are stored in Windows Credential Manager. Mori reads the OpenClaw Gateway token from the local OpenClaw configuration in process memory when needed; Mori does not return that token to the user interface or save it in the Mori database.
+This Mori version does not read OpenClaw configuration or credentials and does not connect to OpenClaw Gateway. Legacy OpenClaw credential entries created by older Mori versions are left untouched in Windows Credential Manager.
 
 ## Network connections
 
-By default, Mori connects to Ollama and the OpenClaw Gateway on loopback addresses on your own computer. It does not send your information to the Mori project maintainer.
+By default, Mori connects to the local Ollama endpoint on your own computer. It does not send your information to the Mori project maintainer. For an explicitly confirmed desktop task, screenshots and the task context are sent to the configured Ollama endpoint for visual reasoning; with the default configuration this is `127.0.0.1`.
 
-If you configure a remote model endpoint, Mori sends the prompt and context needed for that request to that endpoint. When you explicitly delegate a desktop task to OpenClaw, Mori sends the task and the screen information needed by the configured Gateway and Agent. The Gateway or Agent may use a model provider configured separately in OpenClaw. Those services' privacy terms and settings apply to information they receive.
+If you configure a remote model endpoint, Mori sends the prompt, context, and any screen images required for that request to that endpoint. The endpoint's privacy terms and settings apply to information it receives.
 
 This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
 
-GitHub Actions builds use the public source repository and public package registries. Build jobs do not access a user's local Mori database, indexed files, Ollama models, or OpenClaw credentials.
+GitHub Actions builds use the public source repository and public package registries. Build jobs do not access a user's local Mori database, indexed files, Ollama models, OpenClaw configuration, or credentials.
 
 ## Retention and deletion
 
-Local data remains on your device until you delete it. You can delete conversations and confirmed memories in Mori. To remove all Mori application data, close Mori and delete its Windows application data directory. OpenClaw device credentials are separate from that directory and can be removed from Windows Credential Manager.
+Local data remains on your device until you delete it. You can delete conversations and confirmed memories in Mori. To remove all Mori application data, close Mori and delete its Windows application data directory. Legacy OpenClaw credential entries are separate and are not changed by Mori.
 
 ## Contact
 

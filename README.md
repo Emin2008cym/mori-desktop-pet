@@ -1,6 +1,6 @@
 # Mori Desktop Pet
 
-Mori is a local-first Windows desktop pet and private assistant for Ollama. It provides Chat, Plan, and Sketch modes, persistent conversations, a local knowledge index, confirmed long-term memories, and an optional OpenClaw desktop handoff.
+Mori is a local-first Windows desktop pet and private assistant for Ollama. It provides Chat, Plan, and Sketch modes, persistent conversations, a local knowledge index, confirmed long-term memories, and supervised visible desktop tasks through its built-in Windows executor.
 
 ## Local development
 
@@ -20,7 +20,7 @@ Full chat history is stored by conversation ID. Requests explicitly use `num_ctx
 
 ## Windows desktop app
 
-The Tauri shell starts the bundled Node service, reuses the installed Ollama instance, and only stops an Ollama process Mori started itself. It creates a transparent always-on-top pet window without opening a browser. Hovering reveals an eight-action radial menu and the compact composer; the menu expands within the current monitor. Chat opens in a separate transparent always-on-top window, and closing chat or the workbench hides only that window. The pet and tray remain available until you select Exit from the tray. Login autostart opens with the workbench hidden. OpenClaw device credentials are read and written through a Rust Credential Manager command hosted by the signed Mori executable; the Node service passes values over a private child-process pipe, not command-line arguments or application files. PDF text extraction uses PDF.js directly, and the packaged Node runtime omits optional native add-ons.
+The Tauri shell starts the bundled Node service, reuses the installed Ollama instance, and only stops an Ollama process Mori started itself. It creates a transparent always-on-top pet window without opening a browser. Hovering reveals an eight-action radial menu and the compact composer; the menu expands within the current monitor. Chat opens in a separate transparent always-on-top window, and closing chat or the workbench hides only that window. The pet and tray remain available until you select Exit from the tray. Login autostart opens with the workbench hidden. PDF text extraction uses PDF.js directly, and the packaged Node runtime omits optional native add-ons.
 
 The project pins the Rust stable MSVC toolchain in `rust-toolchain.toml`. Windows builds also need Microsoft C++ Build Tools and the Windows SDK.
 
@@ -47,11 +47,11 @@ Planned provider: [SignPath.io](https://signpath.io/) and [SignPath Foundation](
 
 See the [Privacy Policy](PRIVACY.md). This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Mori is applying for SignPath Foundation signing; no release is signed until acceptance and per-release approval are complete.
 
-## OpenClaw desktop control
+## Mori desktop tasks
 
-Mori connects to the loopback Gateway with the version-matched WebSocket client. When the user has not supplied a token, the local service asks the OpenClaw CLI for `gateway.auth.token`; if the CLI is not on PATH, it reads only that field from `%USERPROFILE%\.openclaw\openclaw.json` in process memory. The Gateway token is never returned to the UI or written to Mori's data directory. OpenClaw device identity and device-auth tokens are stored in Windows Credential Manager. Before delegation, Mori inspects the registered dedicated `desktop` agent, its effective tool list, confirms `main` cannot access `computer`, and checks that a connected Windows node advertises `screen.snapshot` and `computer.act`.
+Mori no longer connects to or depends on OpenClaw Gateway. On Windows, the local service starts a private worker from the Mori executable. The worker captures the current screen, reads bounded control names and positions through UI Automation, and accepts only validated mouse, keyboard, text, scroll, wait, and finish actions. It has no shell, script, file-system, COM, or application-private-API operation.
 
-OpenClaw's Windows CUA provider is experimental. Its desktop node must run in the interactive user session with a working driver, and the dedicated agent must expose only Computer Use with a vision-capable model. Mori displays and asks you to confirm the full task before submission. During execution, it offers pause, stop, and manual takeover. It instructs the agent to stop and ask before sending, submitting, purchasing, deleting, publishing, or making another high-impact change; that is an agent instruction, not a driver-level click gate. Keep execution supervised. If any capability check fails, Mori refuses the task and never falls back to shell, scripts, or private app APIs.
+Before a task starts, Mori shows the full task for confirmation. It displays progress and provides pause, stop, and takeover controls; detected physical keyboard or mouse input hands control back to you. Enter, delete, and recognized high-impact controls require another approval. Screen contents are untrusted observations and cannot authorize a task. Screenshots stay in memory and are sent to the configured Ollama endpoint for visual reasoning; with the default configuration, that endpoint is `127.0.0.1`. Keep tasks supervised. Mori cannot operate the lock screen or higher-integrity windows. Existing OpenClaw files and Credential Manager entries are left untouched and are not read by this version of Mori.
 
 ## Verification
 

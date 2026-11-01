@@ -4,7 +4,7 @@ import {
   CircleHelp, Clock3, Command, Database, FileText, FolderOpen, Globe2,
   HardDrive, Layers3, LoaderCircle, LockKeyhole, MessageCircle, MoreHorizontal,
   Pause, Play, Plus, Search, Send, Settings2, ShieldCheck, Sparkles, Square, Trash2,
-  WandSparkles, X,
+  WandSparkles, X, Monitor,
 } from 'lucide-react'
 import './App.css'
 import PetWindow from './PetWindow'
@@ -12,20 +12,19 @@ import { streamChat } from './chat-stream'
 import { emit, listen } from '@tauri-apps/api/event'
 import { getAllWindows, getCurrentWindow } from '@tauri-apps/api/window'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { apiFetch, apiUrl } from './api'
 
 type Mode = 'chat' | 'plan' | 'sketch'
 type Page = 'overview' | 'knowledge' | 'memory' | 'tasks'
-type Health = { ollama: boolean; model: boolean; gateway: boolean; openclawReady: boolean; openclawAgentId?: string; openclawStatus?: { ready: boolean; message: string; checks: Array<{ id: string; ready: boolean; detail: string }> }; modelName: string; documentCount?: number; chunkCount?: number; error?: string }
+type Health = { ollama: boolean; model: boolean; desktopSupported?: boolean; modelName: string; documentCount?: number; chunkCount?: number; error?: string; serviceVersion?: number }
+type DesktopStatus = { supported: boolean; ready: boolean; monitorCount?: number; capabilities?: string[]; message: string }
+type DesktopTask = { id: string; conversationId: string; prompt: string; state: string; statusText: string; result: string; stepCount: number; pendingApproval: { kind: 'action' | 'question'; prompt: string } | null; createdAt: string; updatedAt: string }
 type Message = { role: 'user' | 'assistant'; text: string; memorySuggestion?: string }
 type Conversation = { id: string; title: string; mode: Mode; messageCount: number; updatedAt: string }
 type PetStatus = 'idle' | 'thinking' | 'indexing' | 'operating' | 'waiting' | 'error'
 type IndexedDocument = { source: string; name: string; extension: string; chars: number; indexedAt: string }
 type IndexResult = { indexed: Array<{ name: string; chars: number; chunks: number }>; rejected: Array<{ name: string; error: string }>; embeddingsAvailable: boolean; documentCount: number; chunkCount: number }
 type KnowledgeResult = { source: string; excerpt: string; score: number }
-
-const apiBase = '__TAURI_INTERNALS__' in window ? 'http://127.0.0.1:4179' : ''
-const apiUrl = (path: string) => `${apiBase}${path}`
-const apiFetch = (path: string, init?: RequestInit) => fetch(apiUrl(path), init)
 
 const modeLabels: Record<Mode, string> = { chat: '对话', plan: 'Plan', sketch: 'Sketch' }
 const pageLabels: Record<Page, string> = { overview: '总览', knowledge: '知识库', memory: '记忆', tasks: '任务' }
@@ -51,20 +50,17 @@ function DashboardApp() {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', text: '早上好，我在这里。你可以问我本地资料，也可以让我先和你一起梳理计划。' },
   ])
-  const [health, setHealth] = useState<Health>({ ollama: false, model: false, gateway: false, openclawReady: false, modelName: 'qwen3.5:4b' })
-  const [gatewayUrl, setGatewayUrl] = useState('ws://127.0.0.1:18789')
-  const [gatewayToken, setGatewayToken] = useState('')
+  const [health, setHealth] = useState<Health>({ ollama: false, model: false, desktopSupported: false, modelName: 'qwen3.5:4b' })
+  const [desktopSession, setDesktopSession] = useState('')
+  const [desktopStatus, setDesktopStatus] = useState<DesktopStatus>({ supported: false, ready: false, message: '正在检查本地桌面执行器…' })
+  const [desktopTasks, setDesktopTasks] = useState<DesktopTask[]>([])
   const [taskToolScopeConfirmed, setTaskToolScopeConfirmed] = useState(false)
-  const [connecting, setConnecting] = useState(false)
-  const [connectMessage, setConnectMessage] = useState('')
-  const [manualAuthAvailable, setManualAuthAvailable] = useState(false)
-  const [authSource, setAuthSource] = useState('')
   const [activeRun, setActiveRun] = useState('')
-  const [activeTask, setActiveTask] = useState('')
   const [pausedTask, setPausedTask] = useState('')
   const [pendingTask, setPendingTask] = useState('')
   const [operationControlBusy, setOperationControlBusy] = useState(false)
   const [operationText, setOperationText] = useState('')
+  const [approvalResponse, setApprovalResponse] = useState('')
   const [notice, setNotice] = useState('')
   const [search, setSearch] = useState('')
   const [now] = useState(() => new Date())
@@ -73,21 +69,101 @@ function DashboardApp() {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const operationTextRef = useRef(operationText)
   const operationConversationId = useRef(conversationId)
+  const activeRunRef = useRef(activeRun)
 
   useEffect(() => { operationTextRef.current = operationText }, [operationText])
   useEffect(() => { conversationIdRef.current = conversationId }, [conversationId])
+  useEffect(() => { activeRunRef.current = activeRun }, [activeRun])
 
   const refreshConversations = async () => {
     const response = await apiFetch('/api/conversations')
     if (response.ok) setConversations((await response.json()).conversations || [])
   }
 
+  const desktopFetch = (path: string, init: RequestInit = {}) => fetch(apiUrl(path), {
+    ...init,
+    headers: { ...(init.headers || {}), 'X-Mori-Desktop-Session': desktopSession },
+  })
+
   useEffect(() => {
-    const refresh = () => apiFetch('/api/health').then((r) => r.json()).then((data: Health) => setHealth(data)).catch(() => setHealth((v) => ({ ...v, ollama: false, model: false, gateway: false, error: '本地服务未启动' })))
+    const refresh = () => apiFetch('/api/health').then((r) => r.json()).then((data: Health) => setHealth(data)).catch((reason: unknown) => setHealth((v) => ({ ...v, ollama: false, model: false, error: reason instanceof Error ? reason.message : '本地服务未启动' })))
     refresh()
     const timer = window.setInterval(refresh, 9000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    if (!nativeApp) return
+    let cancelled = false
+    let session = ''
+    const refreshDesktop = async (mayRefreshSession = true) => {
+      if (!session) return
+      const [statusResponse, tasksResponse] = await Promise.all([
+        fetch(apiUrl('/api/desktop/status'), { headers: { 'X-Mori-Desktop-Session': session } }),
+        fetch(apiUrl('/api/desktop/tasks'), { headers: { 'X-Mori-Desktop-Session': session } }),
+      ])
+      if (statusResponse.status === 403 || tasksResponse.status === 403) {
+        if (mayRefreshSession) {
+          const sessionResponse = await fetch(apiUrl('/api/desktop/session'))
+          const renewed = sessionResponse.ok ? await sessionResponse.json() as { token?: string } : {}
+          if (renewed.token) {
+            session = renewed.token
+            setDesktopSession(renewed.token)
+            return refreshDesktop(false)
+          }
+        }
+        throw new Error('Mori 桌面任务授权已失效，请重新打开工作台。')
+      }
+      if (!statusResponse.ok || !tasksResponse.ok) throw new Error('本地桌面服务拒绝了请求。')
+      const status = await statusResponse.json() as DesktopStatus
+      const taskList = (await tasksResponse.json()).tasks as DesktopTask[]
+      if (cancelled) return
+      setDesktopStatus(status)
+      setDesktopTasks(taskList)
+      const current = taskList.find((task) => ['running', 'pausing', 'awaiting_approval'].includes(task.state))
+      if (current) {
+        activeRunRef.current = current.id
+        setActiveRun(current.id)
+        setOperationText(current.statusText)
+        setPetStatus(current.state === 'awaiting_approval' ? 'waiting' : 'operating')
+      } else if (activeRunRef.current) {
+        const previous = taskList.find((task) => task.id === activeRunRef.current)
+        activeRunRef.current = ''
+        setActiveRun('')
+        if (previous?.state === 'paused' || previous?.state === 'interrupted') {
+          setPausedTask(previous.prompt)
+          setOperationText(previous.statusText)
+          setPetStatus('waiting')
+        } else if (previous) {
+          setOperationText(previous.statusText)
+          setPetStatus(previous.state === 'failed' ? 'error' : 'idle')
+          if (previous.state === 'completed') {
+            const history = await apiFetch(`/api/chat/history?conversationId=${encodeURIComponent(previous.conversationId)}`)
+            const content = await history.json() as { messages?: Array<{ role: 'user' | 'assistant'; content: string }> }
+            if (!cancelled && conversationIdRef.current === previous.conversationId) {
+              setMessages(content.messages?.map((item) => ({ role: item.role, text: item.content })) || [])
+            }
+            void refreshConversations()
+          }
+        }
+      }
+    }
+    void fetch(apiUrl('/api/desktop/session'), { headers: { 'Cache-Control': 'no-store' } }).then((response) => {
+      if (!response.ok) throw new Error('无法建立 Mori 桌面任务授权。')
+      return response.json()
+    }).then(async (result: { token?: string }) => {
+      if (!result.token || cancelled) throw new Error('Mori 桌面任务授权未返回。')
+      session = result.token
+      setDesktopSession(result.token)
+      await refreshDesktop()
+    }).catch((reason) => { if (!cancelled) setDesktopStatus({ supported: false, ready: false, message: reason instanceof Error ? reason.message : 'Mori 桌面服务未启动。' }) })
+    const timer = window.setInterval(() => {
+      void refreshDesktop().catch((reason) => {
+        if (!cancelled) setDesktopStatus((current) => ({ ...current, ready: false, message: reason instanceof Error ? reason.message : '桌面任务状态读取失败。' }))
+      })
+    }, 1500)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [nativeApp])
 
   useEffect(() => {
     if (!nativeApp) return
@@ -123,35 +199,6 @@ function DashboardApp() {
     void restore()
     return () => { cancelled = true }
   }, [])
-
-  useEffect(() => {
-    const events = new EventSource(apiUrl('/api/openclaw/events'))
-    events.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as { type: string; runId?: string; text?: string; message?: string; ready?: boolean; checks?: Array<{ id: string; ready: boolean; detail: string }> }
-      if (payload.type === 'connected') {
-        setHealth((v) => ({ ...v, openclawReady: payload.ready === true, openclawStatus: { ready: payload.ready === true, message: payload.text || '', checks: payload.checks || [] } }))
-        setConnectMessage(payload.text || 'Gateway 已连接')
-      }
-      if (payload.type === 'disconnected') setHealth((v) => ({ ...v, openclawReady: false }))
-      if (payload.type === 'chat' && (!activeRun || payload.runId === activeRun)) {
-        if (payload.text) setOperationText((current) => payload.message === 'completed' || payload.message === 'error' ? payload.text! : current.startsWith(payload.text!) ? current : `${current}${payload.text}`.slice(-12000))
-        if (payload.message === 'completed') {
-          setPetStatus('idle'); setActiveRun(''); setActiveTask(''); setPausedTask('')
-          const reportConversationId = operationConversationId.current
-          void apiFetch('/api/openclaw/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report: payload.text || operationTextRef.current, conversationId: reportConversationId }) })
-            .then((response) => response.json())
-            .then((result: { ok?: boolean; content?: string }) => {
-              if (result.ok && result.content && conversationId === reportConversationId) setMessages((current) => [...current, { role: 'assistant', text: result.content! }])
-              void refreshConversations()
-            })
-            .catch(() => setNotice('任务完成，但结果未能写入本地会话'))
-        }
-        if (payload.message === 'aborted') { setPetStatus('waiting'); setActiveRun(''); setPausedTask(activeTask); setOperationText((current) => `${current}\n\n[桌面任务已中止]`) }
-        if (payload.message === 'error') { setPetStatus('error'); setNotice('OpenClaw 任务出错'); setActiveRun(''); setActiveTask(''); setOperationText((current) => `${current}\n\n[OpenClaw 任务报告错误]`) }
-      }
-    }
-    return () => events.close()
-  }, [activeRun, activeTask, conversationId])
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: 'smooth' })
@@ -264,7 +311,7 @@ function DashboardApp() {
     const prompt = draft.trim()
     if (!prompt || petStatus === 'thinking') return
     setDraft('')
-    void executePrompt(prompt)
+    void executePrompt(prompt).then((sent) => { if (!sent) setDraft((current) => current || prompt) })
   }
 
   const confirmMemorySuggestion = async (index: number, content: string) => {
@@ -339,58 +386,35 @@ function DashboardApp() {
     return () => { unlistenReady?.(); unlistenMainReady?.(); unlistenChat?.(); unlistenPrompt?.(); unlistenWorkbench?.() }
   }, [nativeApp, chatWindow, historyReady, selectConversation])
 
-  const connectOpenClaw = async (event: FormEvent) => {
-    event.preventDefault()
-    setConnecting(true)
-    setConnectMessage('正在连接本机 Gateway…')
-    try {
-      const response = await apiFetch('/api/openclaw/connect', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: gatewayUrl, ...(gatewayToken.trim() ? { token: gatewayToken.trim() } : {}) }),
-      })
-      const result = await response.json() as { ok: boolean; ready?: boolean; checks?: Array<{ id: string; ready: boolean; detail: string }>; message?: string; error?: string; errorCode?: string; authSource?: string; manualAuthAvailable?: boolean }
-      if (!response.ok || !result.ok) {
-        setHealth((v) => ({ ...v, openclawReady: false }))
-        setAuthSource('')
-        setManualAuthAvailable(result.manualAuthAvailable === true)
-        setConnectMessage(result.error || '连接失败')
-        return
-      }
-      setManualAuthAvailable(false)
-      setAuthSource(result.authSource === 'local-config' ? '已从本机 OpenClaw 配置认证' : '已使用手动令牌认证')
-      setHealth((v) => ({ ...v, openclawReady: result.ready === true, openclawStatus: { ready: result.ready === true, message: result.message || '', checks: result.checks || [] } }))
-      setConnectMessage(result.message || (result.ready ? 'OpenClaw 已就绪' : 'Gateway 已认证，桌面能力尚未就绪'))
-      setGatewayToken('')
-    } catch {
-      setManualAuthAvailable(true)
-      setConnectMessage('Mori 本地服务无响应。请确认应用服务正在运行后重试。')
-    } finally { setConnecting(false) }
-  }
-
   const delegateTask = async () => {
     const request = pendingTask || [...messages].reverse().find((item) => item.role === 'user')?.text
-    if (!request || !health.openclawReady) return
+    if (!request || !desktopStatus.ready || !desktopSession || !taskToolScopeConfirmed || activeRun) return
     setConfirmDelegateOpen(false)
-    setPendingTask('')
-    setActiveTask(request)
     operationConversationId.current = conversationId
     setPausedTask('')
     setPetStatus('operating')
-    setOperationText('正在提交到 OpenClaw…')
+    setOperationText('正在准备本地桌面任务…')
     try {
-      const response = await apiFetch('/api/openclaw/delegate', {
+      const response = await desktopFetch('/api/desktop/tasks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task: request }),
+        body: JSON.stringify({ task: request, conversationId }),
       })
-      const result = await response.json() as { ok: boolean; runId?: string; error?: string }
-      if (!response.ok || !result.ok || !result.runId) throw new Error(result.error || '提交失败')
-      setActiveRun(result.runId)
-      setOperationText('OpenClaw 正在观察桌面并执行任务。你可以随时停止并接管。')
-      setNotice('桌面控制已交给 OpenClaw')
+      const result = await response.json() as { task?: DesktopTask; error?: string }
+      if (!response.ok || !result.task) throw new Error(result.error || '无法创建桌面任务。')
+      const start = await desktopFetch(`/api/desktop/tasks/${result.task.id}/control`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', confirmed: true }),
+      })
+      const started = await start.json() as { ok?: boolean; error?: string }
+      if (!start.ok || !started.ok) throw new Error(started.error || '无法启动桌面任务。')
+      activeRunRef.current = result.task.id
+      setActiveRun(result.task.id)
+      setPendingTask('')
+      setOperationText('Mori 正在观察当前 Windows 桌面。')
+      setNotice('Mori 本地桌面任务已开始')
     } catch (error) {
-      setActiveTask('')
       setPetStatus('error')
-      setOperationText(error instanceof Error ? error.message : 'OpenClaw 任务提交失败')
+      setOperationText(error instanceof Error ? error.message : 'Mori 桌面任务启动失败。')
     }
   }
 
@@ -402,41 +426,50 @@ function DashboardApp() {
   }
   const closeDelegateReview = () => { setConfirmDelegateOpen(false); setPendingTask(''); setPetStatus((current) => current === 'waiting' ? 'idle' : current) }
 
-  const abortOperation = async () => {
+  const controlDesktopTask = async (action: 'pause' | 'stop' | 'takeover') => {
     if (!activeRun) return false
     setOperationControlBusy(true)
     try {
-      const response = await apiFetch('/api/openclaw/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runId: activeRun }) })
+      const response = await desktopFetch(`/api/desktop/tasks/${activeRun}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })
       const result = await response.json() as { ok: boolean; error?: string }
-      if (!response.ok || !result.ok) throw new Error(result.error || 'OpenClaw 没有确认停止。')
-      setActiveRun('')
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Mori 没有确认桌面控制指令。')
+      setOperationText(action === 'pause' ? '正在暂停并交还桌面…' : action === 'takeover' ? '正在停止自动操作并交还桌面…' : '正在停止桌面任务…')
       return true
     } catch (error) {
       setPetStatus('error')
-      setOperationText(`无法确认桌面任务已停止：${error instanceof Error ? error.message : '停止请求失败'}`)
-      setNotice('停止请求失败，请检查 OpenClaw 控制台并手动接管')
+      setOperationText(`桌面控制指令失败：${error instanceof Error ? error.message : '请求失败'}`)
+      setNotice('桌面控制指令未确认，请直接使用鼠标或键盘接管')
       return false
     } finally { setOperationControlBusy(false) }
   }
 
   const pauseOperation = async () => {
-    if (!await abortOperation()) return
-    setPausedTask(activeTask)
-    setPetStatus('waiting')
-    setOperationText('已暂停并交还桌面控制。继续前需要重新确认任务。')
-    setNotice('桌面任务已暂停，可以手动接管')
+    if (!await controlDesktopTask('pause')) return
+    setNotice('正在暂停；Mori 将在当前动作结束后交还桌面')
   }
 
   const stopOperation = async () => {
-    if (!await abortOperation()) return
-    setActiveTask('')
-    setPausedTask('')
-    setPetStatus('idle')
-    setOperationText('已停止。现在由你操作桌面。')
-    setNotice('已停止自动操作，可以手动接管')
+    if (!await controlDesktopTask('stop')) return
+    setNotice('已请求停止 Mori 桌面任务')
   }
 
-  const resumeOperation = () => openDelegateReview(`请继续执行这条已暂停的桌面任务。先重新观察当前屏幕，确认现状后再操作；原任务是：${pausedTask}`)
+  const takeoverOperation = async () => {
+    if (!await controlDesktopTask('takeover')) return
+    setNotice('已请求停止并交还桌面控制权')
+  }
+
+  const resumeOperation = () => openDelegateReview(pausedTask)
+
+  const answerDesktopApproval = async (choice: 'approve' | 'deny' | 'answer', taskId = activeRun, responseText = approvalResponse) => {
+    if (!taskId) return
+    try {
+      const response = await desktopFetch(`/api/desktop/tasks/${taskId}/approval`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ choice, response: responseText }) })
+      const result = await response.json() as { ok?: boolean; error?: string }
+      if (!response.ok || !result.ok) throw new Error(result.error || '无法提交审批。')
+      setApprovalResponse('')
+      setNotice(choice === 'approve' ? '已批准当前桌面步骤' : choice === 'answer' ? '已把你的回答交给 Mori' : '已拒绝当前桌面步骤')
+    } catch (error) { setNotice(error instanceof Error ? error.message : '无法提交桌面审批。') }
+  }
 
   const openPage = (next: Page) => { setPage(next); if (!nativeApp) setPanelOpen(next !== 'overview') }
 
@@ -469,8 +502,8 @@ function DashboardApp() {
           <div className="breadcrumb"><span>工作台</span><span className="crumb-slash">/</span><b>{pageTitle}</b></div>
           <div className="top-actions">
             <div className="model-chip"><span className={health.model ? 'connection-dot live' : 'connection-dot'} /><span>{health.modelName}</span><ChevronDown size={14} /></div>
-            <button className="gateway-chip" onClick={() => setSettingsOpen(true)}><span className={health.openclawReady ? 'connection-dot live coral' : 'connection-dot coral'} />OpenClaw <span className="gateway-status">{health.openclawReady ? '已连接' : '未连接'}</span></button>
-            <button className="icon-button top-settings" title="连接设置" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button>
+            <button className="desktop-chip" onClick={() => setSettingsOpen(true)}><span className={desktopStatus.ready ? 'connection-dot live coral' : 'connection-dot coral'} />桌面执行 <span className="desktop-status">{desktopStatus.ready ? '就绪' : '未就绪'}</span></button>
+            <button className="icon-button top-settings" title="桌面执行器状态" onClick={() => setSettingsOpen(true)}><Settings2 size={17} /></button>
           </div>
         </header>
 
@@ -479,7 +512,7 @@ function DashboardApp() {
 
           {page === 'overview' && <>
             <section className="hero-stage">
-              <div className="hero-copy"><div className="online-label"><span className="pulse-dot" />{health.model ? '本地模型在线' : '等待本地模型'}</div><h2>我是 Mori。<br /><em>你的私人智能体。</em></h2><p>我在本机运行，可以帮你检索资料、一起梳理计划，也能把桌面操作交给 OpenClaw 完成。</p><div className="hero-buttons"><button className="primary-button" onClick={() => requestChat('chat')}><MessageCircle size={16} />开始对话</button><button className="text-button" onClick={() => requestChat('plan')}>先做个计划 <ArrowUpRight size={15} /></button></div><div className="hero-foot"><span><LockKeyhole size={13} />内容留在本机</span><span><HardDrive size={13} />Ollama · {health.modelName}</span></div></div>
+              <div className="hero-copy"><div className="online-label"><span className="pulse-dot" />{health.model ? '本地模型在线' : '等待本地模型'}</div><h2>我是 Mori。<br /><em>你的私人智能体。</em></h2><p>我在本机运行，可以帮你检索资料、一起梳理计划，也能在你确认后通过可见的鼠标和键盘操作桌面。</p>{!health.model && health.error && <p className="model-error" role="status">{health.error}</p>}<div className="hero-buttons"><button className="primary-button" onClick={() => requestChat('chat')}><MessageCircle size={16} />开始对话</button><button className="text-button" onClick={() => requestChat('plan')}>先做个计划 <ArrowUpRight size={15} /></button></div><div className="hero-foot"><span><LockKeyhole size={13} />内容留在本机</span><span><HardDrive size={13} />Ollama · {health.modelName}</span></div></div>
               <div className="hero-mascot-wrap"><img className={`hero-mascot status-${petStatus}`} src="/mori-wildman-transparent.png" alt="黑白野人 Mori 桌宠" /><div className="speech-tag"><span className="mini-spark">✦</span> 我在听</div><div className="mascot-caption"><strong>Mori</strong><span>本地陪伴 · 随时可唤醒</span></div></div>
               <div className="hero-index"><div className="index-icon"><Database size={17} /></div><div><strong>本地知识</strong><span>等待添加授权来源</span></div><button onClick={() => openPage('knowledge')} aria-label="管理知识来源"><ArrowUpRight size={16} /></button></div>
             </section>
@@ -489,7 +522,7 @@ function DashboardApp() {
               <div className="quick-grid">
                 <button className="quick-item" onClick={() => requestChat('plan')}><div className="quick-icon amber"><WandSparkles size={17} /></div><div><strong>整理一个计划</strong><span>逐步澄清目标与约束</span></div><ArrowUpRight size={15} /></button>
                 <button className="quick-item" onClick={() => requestChat('sketch')}><div className="quick-icon teal"><Command size={17} /></div><div><strong>继续自由构思</strong><span>提示可以边聊边追加</span></div><ArrowUpRight size={15} /></button>
-                <button className="quick-item" onClick={() => setSettingsOpen(true)}><div className="quick-icon coral"><Play size={17} /></div><div><strong>连接 OpenClaw</strong><span>委派可见的桌面操作</span></div><ArrowUpRight size={15} /></button>
+                <button className="quick-item" onClick={() => openPage('tasks')}><div className="quick-icon coral"><Monitor size={17} /></div><div><strong>Mori 桌面任务</strong><span>确认后操作当前屏幕</span></div><ArrowUpRight size={15} /></button>
               </div>
             </section>
 
@@ -503,9 +536,9 @@ function DashboardApp() {
 
           {page === 'knowledge' && <KnowledgePage search={search} setSearch={setSearch} onIndex={indexFiles} nativeApp={nativeApp} />}
           {page === 'memory' && <MemoryPage />}
-          {page === 'tasks' && <TasksPage connected={health.openclawReady} onConnect={() => setSettingsOpen(true)} onResume={() => requestChat()} />}
+          {page === 'tasks' && <TasksPage tasks={desktopTasks} status={desktopStatus} onReview={openDelegateReview} onOpenChat={() => requestChat()} onApproval={(id, choice, response) => void answerDesktopApproval(choice, id, response)} onControl={(id, action) => { setActiveRun(id); activeRunRef.current = id; void desktopFetch(`/api/desktop/tasks/${id}/control`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }).then((response) => response.json()).then((result) => { if (!result.ok) setNotice(result.error || '任务控制失败') }).catch(() => setNotice('Mori 本地服务无响应。')) }} />}
 
-          <footer className="page-footer"><span><ShieldCheck size={14} />隐私优先 · 本机数据</span><span>Qwen 3.5 <b>·</b> Ollama <b>·</b> OpenClaw</span></footer>
+          <footer className="page-footer"><span><ShieldCheck size={14} />隐私优先 · 本机数据</span><span>Qwen 3.5 <b>·</b> Ollama <b>·</b> Mori 桌面执行器</span></footer>
         </div>
       </section>
 
@@ -520,23 +553,23 @@ function DashboardApp() {
       </div>}
 
       {panelOpen && (!nativeApp || chatWindow) && <section className="chat-panel" aria-label="Mori 对话面板">
-        <div className="chat-panel-head"><div className="chat-title"><div className="chat-avatar"><img src="/mori-wildman-transparent.png" alt="" /></div><div><strong>Mori <span className="verified"><Check size={10} /></span></strong><span>{petStatus === 'operating' ? 'OpenClaw 正在操作桌面' : '本地私人智能体'}</span></div></div><div className="chat-head-actions"><button title="新建对话" onClick={() => void createConversation()}><Plus size={16} /></button><button title="关闭" onClick={closeChat}><X size={17} /></button></div></div>
+        <div className="chat-panel-head"><div className="chat-title"><div className="chat-avatar"><img src="/mori-wildman-transparent.png" alt="" /></div><div><strong>Mori <span className="verified"><Check size={10} /></span></strong><span>{petStatus === 'operating' ? 'Mori 正在操作桌面' : '本地私人智能体'}</span></div></div><div className="chat-head-actions"><button title="新建对话" onClick={() => void createConversation()}><Plus size={16} /></button><button title="关闭" onClick={closeChat}><X size={17} /></button></div></div>
         <div className="chat-mode-tabs">{(['chat', 'plan', 'sketch'] as Mode[]).map((item) => <button key={item} className={mode === item ? 'chat-tab selected' : 'chat-tab'} onClick={() => setMode(item)}>{modeLabels[item]}</button>)}</div>
         <div className="conversation-toolbar"><select aria-label="选择会话" value={conversationId} onChange={(event) => void selectConversation(event.target.value)}>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title || '新对话'}</option>)}</select><label><Search size={12} /><input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="搜索历史对话" /></label></div>
         {conversationSearch.trim().length >= 2 && conversationResults.length > 0 && <div className="conversation-search-results">{conversationResults.map((item) => <button key={`${item.conversationId}-${item.messageId}`} onClick={() => { void selectConversation(item.conversationId); setConversationSearch(''); setPanelOpen(true) }}><strong>{item.title}</strong><span>{item.excerpt}</span></button>)}</div>}
         <div className="transcript" ref={transcriptRef}>
           <div className="conversation-date"><span />今天<span /></div>
           {messages.map((message, index) => <div key={`${index}-${message.role}`} className={`message-row ${message.role}`}><div className="message-avatar">{message.role === 'assistant' ? <img src="/mori-wildman-transparent.png" alt="" /> : '林'}</div><div className="message-body"><span className="message-author">{message.role === 'assistant' ? 'Mori' : '你'} <small>{message.role === 'assistant' ? '· 本机' : ''}</small></span><div className={`message-text ${!message.text ? 'streaming' : ''}`}>{message.text || <><i /><i /><i /></>}</div>{message.memorySuggestion && <div className="memory-suggestion-card"><span>记住这条长期事实？</span><p>{message.memorySuggestion}</p><button onClick={() => void confirmMemorySuggestion(index, message.memorySuggestion!)}><Check size={12} />确认保存</button></div>}</div></div>)}
-          {operationText && <div className="operation-card"><div className="operation-head"><span className="operation-pulse" />桌面委派 <span className="operation-via">OpenClaw</span>{activeRun && <><button disabled={operationControlBusy} title="暂停并接管" onClick={() => void pauseOperation()}><Pause size={12} />暂停</button><button disabled={operationControlBusy} title="停止并接管" onClick={() => void stopOperation()}><Square size={11} fill="currentColor" />停止</button></>}{!activeRun && pausedTask && <button title="重新确认后继续" onClick={resumeOperation}><Play size={11} />继续</button>}</div><p>{operationText}</p>{!activeRun && !pausedTask && operationText.startsWith('已停止') && <span className="handoff-label"><Check size={12} />控制权已交还给你</span>}</div>}
-          {messages.some((item) => item.role === 'user' && /(打开|点击|鼠标|桌面|网页|浏览器|填写|操作电脑|帮我操作|关掉|启动)/.test(item.text)) && <div className="delegate-nudge"><div><MonitorGlyph /><span><b>需要操作当前桌面？</b><small>将任务交给 OpenClaw，以可见的鼠标和键盘完成。</small></span></div><button disabled={!health.openclawReady || !!activeRun} onClick={() => openDelegateReview()}>{activeRun ? '正在操作' : '交给 OpenClaw'}<ArrowUpRight size={14} /></button></div>}
+          {operationText && <div className="operation-card"><div className="operation-head"><span className="operation-pulse" />Mori 桌面任务 <span className="operation-via">本机执行</span>{activeRun && <><button disabled={operationControlBusy} title="暂停并交还控制权" onClick={() => void pauseOperation()}><Pause size={12} />暂停</button><button disabled={operationControlBusy} title="停止任务" onClick={() => void stopOperation()}><Square size={11} fill="currentColor" />停止</button><button disabled={operationControlBusy} title="停止并立即接管" onClick={() => void takeoverOperation()}><Monitor size={12} />接管</button></>}{!activeRun && pausedTask && <button title="重新确认后观察当前桌面" onClick={resumeOperation}><Play size={11} />重新开始</button>}</div><p>{operationText}</p>{activeRun && desktopTasks.find((task) => task.id === activeRun)?.pendingApproval && <div className="desktop-approval"><strong>{desktopTasks.find((task) => task.id === activeRun)?.pendingApproval?.kind === 'question' ? 'Mori 需要你回答' : '等待你批准这一步'}</strong><p>{desktopTasks.find((task) => task.id === activeRun)?.pendingApproval?.prompt}</p>{desktopTasks.find((task) => task.id === activeRun)?.pendingApproval?.kind === 'question' ? <><textarea value={approvalResponse} onChange={(event) => setApprovalResponse(event.target.value)} rows={2} placeholder="输入回答" /><button className="primary-button" disabled={!approvalResponse.trim()} onClick={() => void answerDesktopApproval('answer')}>发送回答</button><button className="secondary-button" onClick={() => void answerDesktopApproval('deny')}>取消任务</button></> : <><button className="primary-button" onClick={() => void answerDesktopApproval('approve')}>批准这一步</button><button className="secondary-button" onClick={() => void answerDesktopApproval('deny')}>拒绝并停止</button></>}</div>}{!activeRun && pausedTask && <span className="handoff-label"><Check size={12} />桌面控制权已交还给你</span>}</div>}
+          {messages.some((item) => item.role === 'user' && /(打开|点击|鼠标|桌面|网页|浏览器|填写|操作电脑|帮我操作|关掉|启动)/.test(item.text)) && <div className="delegate-nudge"><div><MonitorGlyph /><span><b>需要操作当前桌面？</b><small>确认任务后，Mori 会用当前屏幕和可见键鼠完成。</small></span></div><button disabled={!desktopStatus.ready || !!activeRun} onClick={() => openDelegateReview()}>{activeRun ? '正在操作' : '创建桌面任务'}<ArrowUpRight size={14} /></button></div>}
         </div>
         <form className="panel-composer" onSubmit={sendPrompt}><textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt() } }} placeholder={mode === 'sketch' ? '继续输入，按 Enter 追加…' : '写下你的问题…'} rows={2} /><div className="panel-composer-foot"><div><span className="local-lock"><LockKeyhole size={12} />本地对话</span><span className="composer-hint">Shift + Enter 换行</span></div><button className="panel-send" type="submit" disabled={!draft.trim() || petStatus === 'thinking'} aria-label="发送"><Send size={15} /></button></div></form>
-        <div className="panel-bottom"><span><span className="connection-dot live" />Ollama · {health.modelName}</span><button onClick={() => setSettingsOpen(true)}>连接设置 <ArrowUpRight size={12} /></button></div>
+        <div className="panel-bottom"><span><span className="connection-dot live" />Ollama · {health.modelName}</span><button onClick={() => setSettingsOpen(true)}>桌面执行器 <ArrowUpRight size={12} /></button></div>
       </section>}
 
-      {settingsOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false) }}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="modal-heading"><div><span className="section-overline">LOCAL CONNECTOR</span><h2 id="settings-title">连接 OpenClaw</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="关闭"><X size={17} /></button></header><p className="modal-intro">Mori 优先从本机 OpenClaw 配置认证，令牌不会显示或保存。首次配对凭据保存在 Windows 凭据管理器中。</p><form className="connector-form" onSubmit={connectOpenClaw}><label>Gateway 地址<input value={gatewayUrl} onChange={(e) => setGatewayUrl(e.target.value)} spellCheck={false} /></label>{manualAuthAvailable && <details className="manual-auth"><summary>手动高级入口</summary><label>Gateway 令牌<input value={gatewayToken} onChange={(e) => setGatewayToken(e.target.value)} type="password" autoComplete="off" placeholder="仅用于本次本机连接，不会保存" /></label></details>}<button className="primary-button connect-submit" disabled={connecting}>{connecting ? <LoaderCircle size={15} className="spin" /> : <PlugGlyph />}{connecting ? '正在检查 Gateway 与桌面权限…' : '连接并检查就绪状态'}</button></form>{authSource && <p className="auth-source"><LockKeyhole size={12} />{authSource}</p>}{connectMessage && <div className={health.openclawReady ? 'connection-result good' : 'connection-result'}>{health.openclawReady && <Check size={14} />}{connectMessage}{health.openclawStatus?.checks.filter((check) => !check.ready).map((check) => <small key={check.id}>{check.detail}</small>)}</div>}<div className="scope-note"><ShieldCheck size={15} /><span>执行前要求专用 desktop Agent、computer 工具策略和 Windows 桌面节点同时就绪。缺少任一项都不能委派。</span></div></section></div>}
+      {settingsOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false) }}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="modal-heading"><div><span className="section-overline">LOCAL DESKTOP</span><h2 id="settings-title">Mori 桌面执行器</h2></div><button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="关闭"><X size={17} /></button></header><p className="modal-intro">桌面任务只在当前 Windows 登录会话运行。Mori 使用屏幕截图、只读控件信息和可见鼠标键盘；不会调用命令行或应用私有接口。</p><div className={desktopStatus.ready ? 'connection-result good' : 'connection-result'}><span className={desktopStatus.ready ? 'connection-dot live' : 'connection-dot'} />{desktopStatus.message}</div><div className="scope-note"><ShieldCheck size={15} /><span>锁屏、安全桌面或更高权限窗口不可控制。你可以随时移动鼠标或按键接管；高影响步骤会停下来等你批准。</span></div></section></div>}
 
-      {confirmDelegateOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDelegateReview() }}><section className="settings-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delegate-title"><header className="modal-heading"><div><span className="section-overline">VISIBLE DESKTOP CONTROL</span><h2 id="delegate-title">确认桌面委派</h2></div><button className="icon-button" onClick={closeDelegateReview} aria-label="关闭"><X size={17} /></button></header><p className="modal-intro">即将把下面这条完整任务交给已验证的 OpenClaw Agent「{health.openclawAgentId || 'desktop'}」。执行期间你可以暂停、停止或手动接管。</p><blockquote className="delegate-review">{pendingTask}</blockquote><label className="safety-check task-scope-check"><input type="checkbox" checked={taskToolScopeConfirmed} onChange={(event) => setTaskToolScopeConfirmed(event.target.checked)} /><span><b>我已检查上面的任务全文，并同意本次可见桌面操作。</b></span></label><p className="approval-caution">发送、提交、付款、删除、发布或其他高影响动作前，Agent 必须先停下请求确认。Mori 会显示实时执行状态；请保持监督，或随时暂停并接管。</p><div className="delegate-review-actions"><button className="secondary-button" onClick={closeDelegateReview}>返回修改</button><button className="primary-button" disabled={!health.openclawReady || !!activeRun || !pendingTask || !taskToolScopeConfirmed} onClick={() => void delegateTask()}>确认并开始 <ArrowUpRight size={14} /></button></div></section></div>}
+      {confirmDelegateOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDelegateReview() }}><section className="settings-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delegate-title"><header className="modal-heading"><div><span className="section-overline">VISIBLE DESKTOP CONTROL</span><h2 id="delegate-title">确认 Mori 操作桌面</h2></div><button className="icon-button" onClick={closeDelegateReview} aria-label="关闭"><X size={17} /></button></header><p className="modal-intro">请检查完整任务内容。确认后 Mori 才会观察当前桌面并逐步操作；遇到需要提交或确认的步骤会再次询问。</p><blockquote className="delegate-review">{pendingTask}</blockquote><label className="safety-check task-scope-check"><input type="checkbox" checked={taskToolScopeConfirmed} onChange={(event) => setTaskToolScopeConfirmed(event.target.checked)} /><span><b>我已检查上面的任务全文，并同意本次可见桌面操作。</b></span></label><p className="approval-caution">执行期间可暂停、停止或接管。应用重启后不会重放旧动作；继续前会重新观察桌面。</p><div className="delegate-review-actions"><button className="secondary-button" onClick={closeDelegateReview}>返回修改</button><button className="primary-button" disabled={!desktopStatus.ready || !!activeRun || !pendingTask || !taskToolScopeConfirmed} onClick={() => void delegateTask()}>确认并开始 <ArrowUpRight size={14} /></button></div></section></div>}
 
       {notice && <div className="toast"><Check size={15} />{notice}<button onClick={() => setNotice('')} aria-label="关闭提示"><X size={14} /></button></div>}
     </main>
@@ -570,7 +603,7 @@ function KnowledgePage({ search, setSearch, onIndex, nativeApp }: { search: stri
   useEffect(() => {
     void refresh()
     void refreshRoots()
-    const events = new EventSource(apiUrl('/api/openclaw/events'))
+    const events = new EventSource(apiUrl('/api/events'))
     events.onmessage = (event) => {
       const payload = JSON.parse(event.data) as { type: string; completed?: number; total?: number; failed?: number; message?: string }
       if (payload.type === 'index-progress') setFeedback(`正在索引 ${payload.completed} / ${payload.total} 个文件${payload.failed ? ` · ${payload.failed} 个暂不可读取` : ''}`)
@@ -703,12 +736,22 @@ function MemoryPage() {
   return <div className="subpage"><div className="memory-intro"><div className="quick-icon amber"><Archive size={18} /></div><div><span className="section-overline">LONG-TERM CONTEXT</span><h2>记忆由你掌控。</h2><p>只保存你明确添加的偏好和长期事实，会纳入后续本地对话，可随时删除。</p></div></div><form className="memory-form" onSubmit={save}><textarea value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={2000} rows={3} placeholder="例如：我偏好先看简短结论，再看详细步骤。" /><div><span>{error || `${draft.length} / 2000`}</span><button className="primary-button" disabled={busy || !draft.trim()}>{busy ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}保存记忆</button></div></form>{memories.length ? <div className="memory-list">{memories.map((memory) => <article className="memory-item" key={memory.id}><div><Sparkles size={14} /><span>{memory.content}</span></div><button className="icon-button" onClick={() => void remove(memory.id)} aria-label="删除记忆" title="删除记忆"><Trash2 size={14} /></button></article>)}</div> : <div className="empty-state"><div className="empty-icon"><Sparkles size={21} /></div><strong>还没有保存的记忆</strong><span>添加一条你希望 Mori 在后续对话中记住的信息。</span></div>}</div>
 }
 
-function TasksPage({ connected, onConnect, onResume }: { connected: boolean; onConnect: () => void; onResume: () => void }) {
-  return <div className="subpage"><div className="task-summary"><div><span className="section-overline">TASKS & APPROVALS</span><h2>每一步都在你掌握中。</h2><p>桌面控制只会在你显式委派后开始。</p></div><div className="task-count"><strong>0</strong><span>运行中</span></div></div><div className="task-access"><div className="task-access-icon"><Activity size={18} /></div><div><strong>OpenClaw 桌面执行器</strong><span>鼠标、键盘和当前屏幕 · 本机 Gateway</span><small>{connected ? '已连接，等待你委派任务' : '尚未连接，前往连接设置完成配置'}</small></div><button className="source-action" onClick={onConnect}>{connected ? '连接设置' : '连接'}<ArrowUpRight size={14} /></button></div><div className="task-empty"><div className="empty-icon"><Check size={20} /></div><strong>没有待处理任务</strong><span>从桌宠输入一个任务，完成本地对话后可选择交给 OpenClaw。</span><button className="text-button" onClick={onResume}>打开对话 <ArrowUpRight size={14} /></button></div></div>
+function TasksPage({ tasks, status, onReview, onOpenChat, onControl, onApproval }: { tasks: DesktopTask[]; status: DesktopStatus; onReview: (task: string) => void; onOpenChat: () => void; onControl: (id: string, action: 'pause' | 'stop' | 'takeover') => void; onApproval: (id: string, choice: 'approve' | 'deny' | 'answer', response?: string) => void }) {
+  const [taskDraft, setTaskDraft] = useState('')
+  const [approvalResponse, setApprovalResponse] = useState('')
+  const active = tasks.find((task) => ['running', 'pausing', 'awaiting_approval'].includes(task.state))
+  const labels: Record<string, string> = { awaiting_confirmation: '等待确认', running: '运行中', pausing: '正在暂停', paused: '已暂停', awaiting_approval: '等待你批准', completed: '已完成', failed: '失败', stopped: '已停止', interrupted: '已中断' }
+  return <div className="subpage">
+    <div className="task-summary"><div><span className="section-overline">LOCAL DESKTOP TASKS</span><h2>桌面任务</h2><p>{status.message}</p></div><div className="task-count"><strong>{active ? '1' : '0'}</strong><span>运行中</span></div></div>
+    <div className="task-access"><div className="task-access-icon"><Monitor size={18} /></div><div><strong>Mori 原生桌面执行器</strong><span>屏幕观察 · 只读控件信息 · 可见鼠标键盘</span><small>{status.ready ? `已就绪 · ${status.monitorCount || 1} 个显示器` : '桌面执行器不可用'}</small></div><span className={status.ready ? 'connection-dot live' : 'connection-dot'} /></div>
+    <form className="desktop-task-form" onSubmit={(event) => { event.preventDefault(); if (taskDraft.trim()) { onReview(taskDraft.trim()); setTaskDraft('') } }}><label htmlFor="desktop-task-input">新建桌面任务</label><textarea id="desktop-task-input" value={taskDraft} onChange={(event) => setTaskDraft(event.target.value)} maxLength={12000} rows={3} placeholder="例如：打开浏览器搜索某个主题，并把前三个结果整理到对话里。" /><div><span>确认后才开始操作。遇到提交、发送或删除等步骤会再次询问。</span><button className="primary-button" disabled={!status.ready || !taskDraft.trim()}><Monitor size={14} />检查任务并确认</button></div></form>
+    {active && <section className="desktop-task-active"><div><span className="section-overline">CURRENT TASK · {labels[active.state] || active.state}</span><strong>{active.prompt}</strong><small>{active.statusText} · {active.stepCount} 步</small>{active.pendingApproval && <div className="desktop-approval"><strong>{active.pendingApproval.kind === 'question' ? 'Mori 需要你回答' : '请检查并批准下一步'}</strong><p>{active.pendingApproval.prompt}</p>{active.pendingApproval.kind === 'question' && <textarea value={approvalResponse} onChange={(event) => setApprovalResponse(event.target.value)} rows={2} placeholder="输入回答" />}{active.pendingApproval.kind === 'question' ? <><button className="primary-button" disabled={!approvalResponse.trim()} onClick={() => { onApproval(active.id, 'answer', approvalResponse); setApprovalResponse('') }}>发送回答</button><button className="secondary-button" onClick={() => onApproval(active.id, 'deny')}>取消任务</button></> : <><button className="primary-button" onClick={() => onApproval(active.id, 'approve')}>批准这一步</button><button className="secondary-button" onClick={() => onApproval(active.id, 'deny')}>拒绝并停止</button></>}</div>}</div><div className="desktop-task-controls"><button className="secondary-button" onClick={() => onControl(active.id, 'pause')}><Pause size={13} />暂停</button><button className="secondary-button" onClick={() => onControl(active.id, 'stop')}><Square size={11} />停止</button><button className="secondary-button" onClick={() => onControl(active.id, 'takeover')}><Monitor size={13} />接管</button></div></section>}
+    <div className="section-heading desktop-history-heading"><div><span className="section-overline">TASK HISTORY</span><h3>最近任务</h3></div><button className="quiet-link" onClick={onOpenChat}>打开对话 <ArrowUpRight size={14} /></button></div>
+    {tasks.length ? <div className="desktop-task-list">{tasks.map((task) => <article className="desktop-task-row" key={task.id}><div className="desktop-task-state"><span className={['running', 'pausing', 'awaiting_approval'].includes(task.state) ? 'connection-dot live' : 'connection-dot'} />{labels[task.state] || task.state}</div><div className="desktop-task-detail"><strong>{task.prompt}</strong><span>{task.statusText}</span><small>{new Date(task.updatedAt).toLocaleString('zh-CN')} · {task.stepCount} 步</small></div>{['paused', 'interrupted'].includes(task.state) && <button className="source-action" onClick={() => onReview(task.prompt)}>重新观察并确认 <ArrowUpRight size={14} /></button>}</article>)}</div> : <div className="task-empty"><div className="empty-icon"><Check size={20} /></div><strong>还没有桌面任务</strong><span>输入任务后，Mori 会先显示完整内容供你确认。</span><button className="text-button" onClick={onOpenChat}>打开对话 <ArrowUpRight size={14} /></button></div>}
+  </div>
 }
 
 function MonitorGlyph() { return <span className="monitor-glyph"><Activity size={15} /></span> }
-function PlugGlyph() { return <span className="plug-glyph"><Play size={13} /></span> }
 
 
 function App() {
