@@ -18,6 +18,6 @@ button, input, textarea { font: inherit; letter-spacing: 0; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #83a58e; outline-offset: 2px; }
 ::selection { color: #234b3c; background: #dbe9dc; }
 
-html.pet-window, html.pet-window body, html.pet-window #root { background: transparent; }
+html.pet-window, html.pet-window body, html.pet-window #root { min-width: 0; min-height: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
 html.pet-window { color-scheme: light; }
 html.chat-window { color-scheme: light; }

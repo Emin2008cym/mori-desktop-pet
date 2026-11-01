@@ -3,9 +3,13 @@ use std::sync::Mutex;
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::time::Duration;
+use std::fs::OpenOptions;
+use std::io::Write;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, RunEvent, WebviewWindowBuilder};
+use tauri::{Manager, RunEvent};
 use tauri_plugin_autostart::ManagerExt;
 
 mod credential_store;
@@ -59,8 +63,8 @@ pub fn run() {
                 let size = monitor.size();
                 let scale = monitor.scale_factor();
                 (
-                    position.x as f64 / scale + size.width as f64 / scale - 170.0,
-                    position.y as f64 / scale + size.height as f64 / scale - 190.0,
+                    position.x as f64 / scale + size.width as f64 / scale - 104.0,
+                    position.y as f64 / scale + size.height as f64 / scale - 154.0,
                 )
             }).unwrap_or((1040.0, 600.0));
 
@@ -70,7 +74,7 @@ pub fn run() {
                 tauri::WebviewUrl::App("index.html?pet=1".into()),
             )
             .title("Mori")
-            .inner_size(150.0, 170.0)
+            .inner_size(84.0, 102.0)
             .position(x, y)
             .transparent(true)
             .decorations(false)
@@ -81,32 +85,20 @@ pub fn run() {
             .visible(true)
             .build()?;
 
-            WebviewWindowBuilder::new(
-                app,
-                "chat",
-                tauri::WebviewUrl::App("index.html?chat=1".into()),
-            )
-            .title("Mori 对话")
-            .inner_size(440.0, 650.0)
-            .position(x - 450.0, y - 155.0)
-            .transparent(true)
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(true)
-            .shadow(false)
-            .visible(false)
-            .build()?;
-
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             #[cfg(not(debug_assertions))]
             {
                 let mut managed = Vec::new();
+                let log_dir = data_dir.join("logs");
+                std::fs::create_dir_all(&log_dir)?;
+                let mut startup_log = OpenOptions::new().create(true).write(true).truncate(true).open(log_dir.join("startup.log"))?;
                 if !service_is_listening(11434) {
                     if let Some(ollama) = find_ollama() {
-                        if let Ok(child) = Command::new(ollama)
-                            .arg("serve")
+                        let mut command = Command::new(ollama);
+                        #[cfg(windows)]
+                        command.creation_flags(0x08000000);
+                        if let Ok(child) = command.arg("serve")
                             .stdin(Stdio::null())
                             .stdout(Stdio::null())
                             .stderr(Stdio::null())
@@ -120,7 +112,13 @@ pub fn run() {
                 let backend_entry = resources.join("server").join("index.mjs");
                 let node_name = if cfg!(windows) { "node.exe" } else { "node" };
                 let node_entry = resources.join("binaries").join(node_name);
-                let backend = Command::new(node_entry)
+                writeln!(startup_log, "Mori resources: {}", resources.display())?;
+                let stdout_log = OpenOptions::new().create(true).write(true).truncate(true).open(log_dir.join("backend-stdout.log"))?;
+                let stderr_log = OpenOptions::new().create(true).write(true).truncate(true).open(log_dir.join("backend-stderr.log"))?;
+                let mut command = Command::new(node_entry);
+                #[cfg(windows)]
+                command.creation_flags(0x08000000);
+                let backend = command
                     .arg(backend_entry)
                     .current_dir(&resources)
                     .env("MORI_DATA_DIR", &data_dir)
@@ -131,9 +129,10 @@ pub fn run() {
                     .env("MORI_EMBEDDING_MODEL", "nomic-embed-text:latest")
                     .env("MORI_AUTOCONNECT_OPENCLAW", "1")
                     .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
+                    .stdout(Stdio::from(stdout_log))
+                    .stderr(Stdio::from(stderr_log))
                     .spawn()?;
+                writeln!(startup_log, "Mori backend PID: {}", backend.id())?;
                 managed.push(backend);
                 app.manage(MoriBackend(Mutex::new(managed)));
             }

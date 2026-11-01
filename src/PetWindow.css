@@ -1,0 +1,33 @@
+.pet-shell { position: relative; width: 100vw; height: 100vh; overflow: hidden; color: #35453b; background: transparent; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }
+.pet-character { position: absolute; width: 84px; height: 102px; }
+.pet-face { position: absolute; top: 14px; left: 10px; width: 64px; height: 72px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+.pet-face img { display: block; width: 64px; height: 72px; object-fit: contain; filter: drop-shadow(0 3px 3px #0004); user-select: none; }
+.pet-face.thinking img { animation: thinkBreath 1.6s ease-in-out infinite; }
+.pet-grip { position: absolute; z-index: 2; top: 0; left: 30px; display: grid; place-items: center; width: 24px; height: 16px; border: 0; border-radius: 8px; color: #d9e9dc; background: #25372bb8; opacity: 0; cursor: grab; }
+.pet-character:hover .pet-grip, .pet-grip:focus-visible { opacity: 1; }
+.pet-label { position: absolute; top: 87px; left: 12px; display: flex; align-items: center; justify-content: center; gap: 5px; width: 60px; height: 14px; border-radius: 7px; color: #f5fff7; background: #203d2cba; font-size: 9px; line-height: 14px; pointer-events: none; }
+.pet-label i { width: 4px; height: 4px; border-radius: 50%; background: #c9a26f; }
+.pet-label i.online { background: #a9e9a8; }
+.pet-popover { position: absolute; display: flex; flex-direction: column; gap: 5px; padding: 5px; background: transparent; }
+.pet-popover-head { display: flex; flex: 0 0 24px; align-items: center; justify-content: space-between; padding: 0 5px 0 9px; border: 1px solid #dfe8dd; border-radius: 10px; color: #536b5a; background: #fffef9f5; font-size: 10px; }
+.pet-popover-head > span { display: flex; align-items: center; gap: 7px; }
+.pet-popover-head > button { display: grid; place-items: center; width: 24px; height: 22px; padding: 0; border: 0; border-radius: 8px; color: #617065; background: transparent; cursor: pointer; }
+.pet-shortcuts { display: grid; flex: 0 0 60px; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }
+.pet-shortcuts button { display: flex; justify-content: center; align-items: center; gap: 4px; min-width: 0; padding: 4px 2px; border: 1px solid #dce5d9; border-radius: 8px; color: #47624f; background: #fffef9f5; font-size: 9px; cursor: pointer; }
+.pet-shortcuts button:hover { background: #e4f0e1; border-color: #8dac91; }
+.pet-messages { display: flex; flex: 1 1 0; flex-direction: column; gap: 9px; min-height: 0; padding: 5px 1px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #849d8a transparent; }
+.pet-message { align-self: flex-start; max-width: 95%; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; }
+.pet-message > div { padding: 8px 10px; border: 1px solid #dce5d9; border-radius: 11px 11px 11px 3px; color: #324539; background: #fffef9f7; white-space: pre-wrap; }
+.pet-message.user { align-self: flex-end; }
+.pet-message.user > div { border-color: #c7dcc6; border-radius: 11px 11px 3px 11px; color: #244b32; background: #e3f2e1f5; }
+.pet-message aside { margin-top: 3px; padding: 6px; border-radius: 6px; background: #faf8e8f7; font-size: 10px; }
+.pet-message aside button { margin: 4px 0 0; border: 1px solid #9cb49e; border-radius: 5px; color: #466b4e; background: #fff; cursor: pointer; }
+.pet-typing, .pet-greeting { color: #627568; }
+.pet-greeting { margin: auto; padding: 8px 12px; border: 1px solid #dce5d9; border-radius: 10px; background: #fffef9ed; font-size: 11px; }
+.pet-typing span { letter-spacing: 2px; }
+.pet-error { padding: 4px 7px; overflow: auto; color: #934e39; background: #fff1e9f5; border-radius: 6px; font-size: 10px; }
+.pet-compose { display: flex; flex: 0 0 38px; align-items: center; gap: 4px; margin-top: auto; padding: 4px 5px; border: 1px solid #d5e0d3; border-radius: 10px; background: #fffef9fa; }
+.pet-current-mode { flex: 0 0 auto; padding: 1px 5px; border-radius: 4px; color: #647d6a; background: #eaf1e7; font-size: 9px; }
+.pet-compose input { flex: 1; width: 0; min-width: 0; height: 26px; padding: 1px 2px; outline: none; border: 0; color: #35483b; background: transparent; font-size: 11px; }
+.pet-compose > button { display: grid; place-items: center; flex: 0 0 27px; height: 27px; padding: 0; border: 0; border-radius: 7px; color: #fff; background: #55795e; cursor: pointer; }
+.pet-compose > button:disabled { opacity: .45; cursor: default; }

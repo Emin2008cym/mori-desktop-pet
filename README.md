@@ -33,13 +33,13 @@ npm run tauri:build
 
 Mori's Windows packages are built on GitHub-hosted Windows runners. The workflow runs tests, builds the frontend and bundled local service, and creates MSI, NSIS, and a local developer payload. Local OpenClaw credentials, Ollama models, conversation history, and indexed files are not part of the build. See [BUILDING.md](BUILDING.md) for repository setup, local installation, release signing, and verification steps.
 
-For personal use on a Windows device with Smart App Control enabled, the same workflow also offers a per-user sparse-MSIX development payload. It signs only the local identity package with a Mori-specific development certificate trusted by the current user; it does not sign a public release or modify Smart App Control. See [BUILDING.md](BUILDING.md#run-mori-locally-with-smart-app-control-enabled) for the install and removal steps.
+The workflow also provides a portable developer payload. Its per-user installer creates a desktop shortcut and installs the bundled local service without certificate or policy changes. See [BUILDING.md](BUILDING.md#run-mori-locally-with-smart-app-control-enabled) for installation and diagnostics.
 
-Unsigned MSI/NSIS CI artifacts are for build validation only. The separate per-user sparse-MSIX route above is a local developer install, not a public release. A release intended for other Windows users still needs a trusted signature on the Mori executable and installer. Signed release automation remains unavailable until the project is accepted by SignPath Foundation and its GitHub signing settings are configured.
+Unsigned MSI/NSIS CI artifacts are for build validation only. The portable payload is for local development and does not guarantee policy acceptance on other machines. A release intended for other Windows users still needs a trusted signature on the Mori executable and installer. Signed release automation remains unavailable until the project is accepted by SignPath Foundation and its GitHub signing settings are configured.
 
 ### Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+Planned provider: [SignPath.io](https://signpath.io/) and [SignPath Foundation](https://signpath.org/). Approval and signing have not been completed.
 
 - Authors and committers: [Emin2008cym](https://github.com/Emin2008cym)
 - Reviewers: [Emin2008cym](https://github.com/Emin2008cym); contributions from other authors are reviewed before merge.

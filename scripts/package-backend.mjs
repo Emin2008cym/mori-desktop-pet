@@ -13,6 +13,7 @@ await cp(join(root, 'server', 'package.json'), join(resources, 'package.json'))
 await cp(join(root, 'server', 'package-lock.json'), join(resources, 'package-lock.json'))
 await cp(join(root, 'server', 'index.mjs'), join(resources, 'server', 'index.mjs'))
 await cp(join(root, 'server', 'openclaw-auth.mjs'), join(resources, 'server', 'openclaw-auth.mjs'))
+await cp(join(root, 'server', 'pdf-text.mjs'), join(resources, 'server', 'pdf-text.mjs'))
 await cp(process.execPath, join(resources, 'binaries', process.platform === 'win32' ? 'node.exe' : 'node'))
 
 const npmCli = process.env.npm_execpath

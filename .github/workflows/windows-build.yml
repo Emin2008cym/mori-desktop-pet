@@ -49,6 +49,9 @@ jobs:
             throw "Unsigned native Node add-ons would be bundled: $($nativeAddons.Name -join ', ')"
           }
 
+      - name: Test isolated packaged backend without optional modules
+        run: node --test scripts/check-packaged-backend.mjs
+
       - name: Create SHA-256 manifest
         shell: pwsh
         run: |
@@ -76,14 +79,10 @@ jobs:
           New-Item -ItemType Directory -Path $payload -Force | Out-Null
           Copy-Item 'src-tauri/target/release/mori-desktop-pet.exe' $payload
           Copy-Item 'src-tauri/resources' $payload -Recurse
-          New-Item -ItemType Directory -Path (Join-Path $payload 'Assets') -Force | Out-Null
-          Copy-Item 'src-tauri/icons/StoreLogo.png' (Join-Path $payload 'Assets/StoreLogo.png')
-          Copy-Item 'src-tauri/icons/Square150x150Logo.png' (Join-Path $payload 'Assets/Square150x150Logo.png')
-          Copy-Item 'src-tauri/icons/Square44x44Logo.png' (Join-Path $payload 'Assets/Square44x44Logo.png')
-          Copy-Item 'installer/msix/AppxManifest.xml' $payload
           Copy-Item 'scripts/install-mori-dev.mjs' $payload
+          Copy-Item 'scripts/install-Mori.cmd' $payload
           Copy-Item 'scripts/uninstall-mori-dev.mjs' $payload
-          Copy-Item 'installer/msix/README.zh-CN.md' $payload
+          Copy-Item 'installer/README.zh-CN.md' $payload
           [System.IO.File]::WriteAllText((Join-Path $payload 'package-version.txt'), $env:PACKAGE_VERSION, [System.Text.Encoding]::ASCII)
           $archive = Join-Path $env:RUNNER_TEMP 'Mori-Dev-Payload.zip'
           Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $archive -CompressionLevel Optimal

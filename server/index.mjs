@@ -9,7 +9,7 @@ import express from 'express'
 import multer from 'multer'
 import JSZip from 'jszip'
 import readXlsxFile from 'read-excel-file/node'
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { openTextPdf } from './pdf-text.mjs'
 import mammoth from 'mammoth'
 import { GatewayClient } from '@openclaw/gateway-client'
 import { classifyOpenClawError, resolveGatewayAuth } from './openclaw-auth.mjs'
@@ -301,7 +301,7 @@ function cleanExtractedText(text, extension) {
 
 async function extractDocument(file, extension) {
   if (extension === '.pdf') {
-    const document = await getDocument({ data: new Uint8Array(file.buffer), useSystemFonts: true, isEvalSupported: false }).promise
+    const document = await openTextPdf(file.buffer)
     try {
       const pages = []
       for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
